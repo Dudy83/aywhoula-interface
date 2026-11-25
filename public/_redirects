@@ -1,0 +1,2 @@
+/proxy/ndbc/*  https://www.ndbc.noaa.gov/:splat  200
+/proxy/candhis/*  https://candhis.cerema.fr/_public_/:splat  200

@@ -1,0 +1,4400 @@
+/* ==========================================================================
+   Aywhoula : instrument de précision. L'interface reste neutre (encre et
+   surfaces sans teinte) ; la couleur appartient aux données et à un seul
+   accent, réservé à l'heure choisie, à la sélection et au focus.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+  --surface: oklch(0.205 0 0);
+  --surface-2: oklch(0.25 0 0);
+  --surface-3: oklch(0.3 0 0);
+  --ink: oklch(0.965 0 0);
+  --ink-2: oklch(0.81 0 0);
+  --ink-3: oklch(0.67 0 0);
+  --line: oklch(1 0 0 / 0.09);
+  --line-2: oklch(1 0 0 / 0.17);
+  --accent: oklch(0.86 0.125 176);
+  --accent-ink: oklch(0.21 0.04 176);
+  --accent-soft: oklch(0.86 0.125 176 / 0.14);
+  --danger: oklch(0.76 0.15 25);
+  --shadow: 0 1px 0 oklch(1 0 0 / 0.05) inset, 0 10px 30px oklch(0 0 0 / 0.5);
+  --map-land: #17191c;
+  --map-halo: oklch(0.12 0 0 / 0.8);
+  /* Voile posé sur les heures de nuit dans les courbes. */
+  --night: oklch(0 0 0 / 0.3);
+  /* Pastilles de statut des lignes d'un lieu : bon, à surveiller, de nuit, pour information. */
+  --status-good: oklch(0.76 0.17 148);
+  --status-watch: oklch(0.8 0.15 75);
+  --status-night: oklch(0.72 0.07 282);
+  --status-neutral: oklch(0.42 0 0);
+
+  --radius: 12px;
+  --radius-sm: 7px;
+  --gap: 14px;
+  --panel-w: 468px;
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* Marges de sécurité de l'appareil : barre d'état, encoche, indicateur d'accueil.
+     Nulles sur ordinateur. Tout ce qui flotte près d'un bord les ajoute à sa marge. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  --z-chrome: 10;
+  --z-panel: 20;
+  --z-popover: 30;
+  --z-overlay: 40;
+
+  font-family: 'Archivo Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.962 0 0);
+  --surface-3: oklch(0.925 0 0);
+  --ink: oklch(0.2 0 0);
+  --ink-2: oklch(0.37 0 0);
+  --ink-3: oklch(0.49 0 0);
+  --line: oklch(0 0 0 / 0.1);
+  --line-2: oklch(0 0 0 / 0.2);
+  --accent: oklch(0.5 0.1 182);
+  --accent-ink: oklch(0.99 0 0);
+  --accent-soft: oklch(0.5 0.1 182 / 0.12);
+  --danger: oklch(0.5 0.17 27);
+  --shadow: 0 0 0 1px oklch(0 0 0 / 0.07), 0 10px 28px oklch(0 0 0 / 0.16);
+  --map-land: #eef0f2;
+  --map-halo: oklch(1 0 0 / 0.88);
+  --night: oklch(0 0 0 / 0.08);
+  --status-good: oklch(0.58 0.15 150);
+  --status-watch: oklch(0.7 0.15 70);
+  --status-night: oklch(0.48 0.09 280);
+  --status-neutral: oklch(0.86 0 0);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--map-land);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+a {
+  color: inherit;
+}
+
+h2,
+h3,
+p,
+ul,
+dl,
+dd,
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+ul {
+  list-style: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* L'écran de démarrage (#splash) et l'animation de la marque (.logo-anim, qui sert
+   aussi à .field-loader plus bas) sont écrits dans index.html : ils s'affichent
+   avant que cette feuille soit chargée. */
+
+/* ------------------------------------------------------------------ carte */
+
+.app {
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--map-land);
+}
+
+.map-host {
+  position: absolute;
+  inset: 0;
+  background: var(--map-land);
+}
+
+.map {
+  width: 100%;
+  height: 100%;
+}
+
+.map .maplibregl-canvas:focus-visible {
+  outline: none;
+}
+
+.pin {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+.pin-target {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: oklch(0.86 0.125 176);
+  box-shadow: 0 0 0 1.5px #0b0d10, 0 2px 8px oklch(0 0 0 / 0.5);
+}
+
+.pin-value {
+  position: absolute;
+  left: 26px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  box-shadow: var(--shadow);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pin-value b {
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  font-stretch: 92%;
+}
+
+.pin-dir {
+  margin-left: 6px;
+  color: var(--ink-3);
+}
+
+/* Rose de sélection (src/map/SelectionRose.tsx) : flèches de vagues, houle, 2e houle et vent
+   autour du point, posées du côté d'où elles viennent. Flèches blanches à halo dans les deux
+   thèmes, comme les particules ; la couleur reste dans les pastilles de valeur. */
+
+.rose {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+
+.rose-svg {
+  position: absolute;
+  overflow: visible;
+}
+
+.rose-ripple {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+.rose-halo {
+  fill: none;
+  stroke: oklch(0.12 0 0 / 0.38);
+  stroke-linecap: round;
+}
+
+.rose-line {
+  fill: none;
+  stroke: #fff;
+  stroke-linecap: round;
+}
+
+.rose-ring {
+  stroke: oklch(1 0 0 / 0.92);
+}
+
+.rose-head {
+  fill: #fff;
+  stroke: oklch(0.12 0 0 / 0.38);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+
+.rose-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  align-items: center;
+  column-gap: 4px;
+  row-gap: 3px;
+  /* Sans largeur explicite, la boîte se réduirait à son contenu minimal : son parent fait 0 px de large. */
+  width: max-content;
+  padding: 4px 6px 4px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 0.6875rem;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  will-change: transform, opacity;
+}
+
+.rose-name {
+  grid-column: 1 / -1;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.rose-detail {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.rose-value {
+  display: inline-flex;
+  animation: rose-tick 160ms var(--ease);
+}
+
+.rose-value .chip {
+  padding: 3px 4px;
+  line-height: 1.1;
+}
+
+/* Valeur qui change avec l'heure : un fondu bref, depuis 55 %. */
+@keyframes rose-tick {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Valeur de la couche active quand la rose ne la montre pas (température, courants...). */
+.rose-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  box-shadow: var(--shadow);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.rose-layer b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* Le point apparaît avec la rose ; en mouvement réduit, par un simple fondu. */
+.pin-target[data-appear='move'] {
+  animation: pin-in 160ms var(--ease);
+}
+
+.pin-target[data-appear='still'] {
+  animation: pin-in-still 120ms var(--ease);
+}
+
+@keyframes pin-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pin-in-still {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------- habillage */
+
+.chrome {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-chrome);
+  pointer-events: none;
+}
+
+.chrome > * {
+  pointer-events: auto;
+}
+
+/* Témoin de chargement des données de la carte : la marque animée et ce qui se
+   charge, dans une pastille pleine en accent, au milieu de la carte visible. C'est
+   la seule surface en accent plein : elle doit se voir sur la carte, claire ou
+   sombre, vide ou colorée. FieldLoader.tsx règle quand elle apparaît. */
+.chrome > .field-loader {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 20px 0 14px;
+  border-radius: 24px;
+  background: var(--accent);
+  box-shadow: var(--shadow);
+  color: var(--accent-ink);
+  font-size: 0.875rem;
+  font-weight: 650;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* Centrée sur son point d'ancrage, et un peu en retrait tant qu'elle est cachée. */
+  transform: translate(-50%, -50%) scale(0.92);
+  transition:
+    opacity 150ms var(--ease),
+    transform 150ms var(--ease),
+    visibility 0s linear 150ms;
+}
+
+.chrome > .field-loader[data-on='true'] {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%);
+  transition:
+    opacity 220ms var(--ease),
+    transform 220ms var(--ease);
+}
+
+.field-loader-what {
+  font-weight: 500;
+  opacity: 0.78;
+}
+
+/* Rien ne tourne tant que la pastille est cachée. */
+.field-loader:not([data-on='true']) .logo-anim * {
+  animation: none;
+}
+
+.topbar {
+  position: absolute;
+  top: calc(10px + var(--safe-top));
+  left: calc(10px + var(--safe-left));
+  right: calc(10px + var(--safe-right));
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 46px;
+  padding: 0 6px 0 4px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  z-index: var(--z-popover);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  flex: none;
+}
+
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+}
+
+.brand-name {
+  display: none;
+  font-size: 1rem;
+  font-weight: 750;
+  font-stretch: 108%;
+  letter-spacing: -0.01em;
+}
+
+.search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 34px 0 34px;
+  border: 0;
+  background: none;
+  font-size: 0.875rem;
+  outline: none;
+  appearance: none;
+}
+
+.search input::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-clear,
+.search-key {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--ink-3);
+}
+
+.search-clear:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.search-key {
+  display: none;
+  border: 1px solid var(--line-2);
+  font-family: inherit;
+  font-size: 0.6875rem;
+  width: 20px;
+  height: 20px;
+}
+
+.results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(60dvh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  scrollbar-width: thin;
+}
+
+.results-group {
+  padding: 8px 8px 4px;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.result {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.result[aria-selected='true'] {
+  background: var(--surface-2);
+}
+
+.result-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.result-star {
+  margin-right: 6px;
+  color: var(--accent);
+  vertical-align: -1px;
+}
+
+.result-meta {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.results-empty {
+  padding: 12px 8px;
+  color: var(--ink-2);
+}
+
+/* Couches : ruban défilant sur mobile, colonne sur grand écran. */
+
+.layers {
+  position: absolute;
+  top: calc(64px + var(--safe-top));
+  left: var(--safe-left);
+  right: var(--safe-right);
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.layers::-webkit-scrollbar {
+  display: none;
+}
+
+.layers-group {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.layers-label {
+  display: none;
+}
+
+.layer {
+  flex: none;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.layer:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.layer[aria-checked='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Boutons de carte */
+
+.controls {
+  position: absolute;
+  top: calc(112px + var(--safe-top));
+  right: calc(10px + var(--safe-right));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.control,
+.controls .popover-trigger {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: var(--ink-2);
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.control:hover:not(:disabled),
+.controls .popover-trigger:hover,
+.controls .popover-trigger[aria-expanded='true'] {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.control-group > :not(:first-child) {
+  border-top: 1px solid var(--line);
+}
+
+.control-group > .popover-host > .popover-trigger,
+.control-group > .control:not(:first-child):not(:last-child) {
+  border-radius: 0;
+}
+
+.control-group > :first-child,
+.control-group > :first-child > .popover-trigger {
+  border-radius: 10px 10px 0 0;
+}
+
+.control-group > :last-child,
+.control-group > :last-child > .popover-trigger {
+  border-radius: 0 0 10px 10px;
+}
+
+.controls-notice {
+  max-width: 230px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+}
+
+/* Panneaux flottants */
+
+.popover-host {
+  position: relative;
+}
+
+.popover {
+  position: absolute;
+  z-index: var(--z-popover);
+  width: max-content;
+  min-width: 250px;
+  max-width: min(320px, calc(100vw - 76px));
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 160ms var(--ease),
+    transform 160ms var(--ease);
+}
+
+@starting-style {
+  .popover {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.popover[data-side='top'] {
+  bottom: calc(100% + 10px);
+}
+
+.popover[data-side='bottom'] {
+  top: calc(100% + 10px);
+}
+
+.popover[data-side='left'] {
+  right: calc(100% + 10px);
+  top: 0;
+}
+
+.popover[data-side='top'][data-align='end'],
+.popover[data-side='bottom'][data-align='end'] {
+  right: 0;
+}
+
+.popover-title {
+  margin-bottom: 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.popover-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 276px;
+  max-width: 100%;
+}
+
+.menu .popover-title {
+  margin-bottom: 0;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.menu-label {
+  color: var(--ink-2);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 34px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 5px;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.segment:hover {
+  color: var(--ink);
+}
+
+.segment[aria-checked='true'] {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.toggle-hint {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.toggle-track {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  transition: background-color 160ms var(--ease);
+}
+
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink-2);
+  transition:
+    transform 160ms var(--ease),
+    background-color 160ms var(--ease);
+}
+
+.toggle input:checked + .toggle-track {
+  background: var(--accent);
+}
+
+.toggle input:checked + .toggle-track::after {
+  transform: translateX(14px);
+  background: var(--accent-ink);
+}
+
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------ ligne de temps */
+
+.dock-area {
+  position: absolute;
+  left: calc(10px + var(--safe-left));
+  right: calc(10px + var(--safe-right));
+  bottom: max(10px, var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.dock-area > * {
+  pointer-events: auto;
+}
+
+.dock {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    'play clock view model'
+    'time time time time';
+  align-items: center;
+  gap: 8px 10px;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.play {
+  grid-area: play;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface);
+  transition: transform 160ms var(--ease);
+}
+
+.play:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.clock {
+  grid-area: clock;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.clock-day {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.clock-hour {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-stretch: 94%;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.timeline {
+  grid-area: time;
+  position: relative;
+  height: 38px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  touch-action: none;
+  overflow: hidden;
+  user-select: none;
+}
+
+.timeline-skeleton {
+  cursor: default;
+}
+
+/*
+ * La ligne de temps sur 16 jours : les couloirs des courbes ou le tableau (`.band`, `.hourcol`), et la
+ * zone Premium en gris neutre avec sa pastille.
+ */
+.timeline.tl {
+  height: auto;
+  border-radius: 0;
+  background: none;
+  cursor: default;
+  overflow: visible;
+  touch-action: auto;
+}
+
+/*
+ * Les courbes : l'échelle de chaque couloir dans une colonne fixe de 34 px, puis ce qui défile de côté.
+ * Au doigt, un glissé fait défiler et une touche choisit l'heure ; à la souris, on fait glisser le
+ * curseur, la molette fait défiler. Les hauteurs sont posées par `TimelineCurves`.
+ */
+.tl-frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.tl-scale {
+  display: block;
+  overflow: visible;
+}
+
+.tl-scale text {
+  fill: var(--ink-3);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-anchor: end;
+}
+
+.tl-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 6px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+.tl-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.tl-plot {
+  position: relative;
+  cursor: ew-resize;
+  touch-action: pan-x;
+  user-select: none;
+}
+
+.tl-lane {
+  position: absolute;
+  left: 0;
+  z-index: 1;
+  display: block;
+  overflow: visible;
+}
+
+/* Les titres des couloirs ne défilent pas : la légende des traits à gauche, l'unité au bout des jours ouverts. */
+.tl-frame > .lane-head {
+  position: absolute;
+  left: 34px;
+  z-index: 3;
+  align-items: center;
+  height: 16px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.tl-keys {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tl-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.tl-key svg {
+  flex: none;
+  overflow: visible;
+}
+
+.lane-unit {
+  color: var(--ink-3);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+/* La largeur du titre suit la frontière de la zone repliée : sous 250 px, plus d'unité ; sous 110 px, plus de titre. */
+.tl-frame > .lane-head[data-fit='title'] .lane-unit {
+  display: none;
+}
+
+.tl-frame > .lane-head[data-fit='none'] {
+  visibility: hidden;
+}
+
+/* La légende des barres (la pluie) : un petit carré. */
+.tl-key-square {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* Le ciel toutes les 6 heures au-dessus de la température : une pastille ronde. */
+.tl-sky {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink-2);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Le curseur : un seul trait, du haut du couloir de la houle jusqu'à l'axe des heures. */
+.tl-cursor {
+  position: absolute;
+  z-index: 2;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* Les heures sous les courbes, puis les jours, alignés sur leur début avec un petit trait. */
+.tl-hours,
+.tl-axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.tl-hours {
+  height: 16px;
+  border-top: 1px solid var(--line-2);
+  color: var(--ink-3);
+  font-size: 0.625rem;
+}
+
+.tl-hours span {
+  position: absolute;
+  top: 3px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.tl-axis {
+  height: 18px;
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+}
+
+.tl-axis span {
+  position: absolute;
+  top: -15px;
+  height: 33px;
+  padding: 17px 0 0 5px;
+  border-left: 1px solid var(--line-2);
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.tl-axis span[data-selected] {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tl-axis span[data-locked],
+.tl-hours span[data-locked] {
+  opacity: 0.6;
+}
+
+/* Les valeurs de l'heure de la carte : des pilules accrochées au curseur, à droite (ou à gauche). */
+.tl-bubble {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(7px);
+}
+
+.tl-bubble[data-side='left'] {
+  transform: translateX(calc(-100% - 7px));
+}
+
+.tl-bubble-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
+}
+
+.tl-bubble-dir .arrow {
+  vertical-align: 0;
+}
+
+/*
+ * Version gratuite : les jours de Premium (du sixième au seizième) gardent l'échelle des jours ouverts. Chaque
+ * couloir continue, hachuré (traits de 1 px à 135° tous les 7 px, `ink` à 12 % sur `surface-2` à 70 %), un
+ * filet `line-2` à chaque début de jour ; les heures et les jours restent dessous, en gris. L'étiquette
+ * « +11 jours » reste collée à gauche de la partie visible de la zone, centrée en hauteur. Toucher la zone ouvre
+ * l'offre.
+ */
+.tl-lock {
+  position: absolute;
+  border-radius: 6px;
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklch, var(--ink) 12%, transparent) 0 1px, transparent 1px 7px),
+    color-mix(in oklch, var(--surface-2) 70%, transparent);
+  pointer-events: none;
+}
+
+.tl-lock-day {
+  position: absolute;
+  width: 1px;
+  background: var(--line-2);
+  pointer-events: none;
+}
+
+.tl-fold-front {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+
+.tl-fold-label {
+  position: sticky;
+  left: 10px;
+  display: inline-flex;
+  margin: 0 10px;
+  border-radius: 10px;
+  pointer-events: auto;
+}
+
+.tl-fold-label:hover .fold-label {
+  background: var(--surface-2);
+}
+
+.tl-hint,
+.tl-empty {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.tl-hint {
+  position: absolute;
+  inset: 0 0 34px 34px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.tl-empty {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+/* Le tableau du détail du jour sur toute la prévision : une colonne de 40 px toutes les 3 heures. */
+/* La grille fait la largeur de ses colonnes : les libellés restent collés à gauche jusqu'au bout. */
+.tl-table .band {
+  width: max-content;
+  min-height: 242px;
+  margin-top: 0;
+  row-gap: 3px;
+}
+
+/* La barre garde sa hauteur d'un type à l'autre et d'une vue à l'autre : le tableau a au moins la hauteur des
+   courbes (242 px, PLOT_H dans src/ui/timeline/shared.tsx) ; ses lignes s'espacent pour la remplir. « Houle en
+   détail », qui a le plus de lignes à flèche, les serre d'un pixel pour y tenir. */
+.tl-table[data-profile='swell'] .band {
+  row-gap: 2px;
+}
+
+.tl-table .band-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.tl-table .hourcol {
+  position: relative;
+}
+
+/* Un filet entre deux jours, de leur nom jusqu'en bas. */
+.tl-table .hourcol[data-daystart]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -19px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--line-2);
+  pointer-events: none;
+}
+
+/* Le nom d'un jour ne déborde pas sur le suivant (`clip` garde le nom collé à gauche, `hidden` le décrocherait). */
+.tl-day {
+  min-width: 0;
+  overflow: clip;
+}
+
+.tl-day-name {
+  position: sticky;
+  left: 56px;
+  display: inline-block;
+  padding-left: 6px;
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.tl-day-name::first-letter {
+  text-transform: uppercase;
+}
+
+/* Version gratuite : après les jours ouverts, les jours de Premium au même pas, jusqu'à la fin du seizième,
+   désactivés : le nom de chaque jour et l'heure de chaque colonne en `ink-3` (l'heure à 70 %), et à chaque
+   ligne une case vide de la taille d'une vraie case, hachurée. Un dessin, sans données ; pas de flou. */
+.tl-ghost-col {
+  display: grid;
+  grid-template-rows: subgrid;
+  justify-items: center;
+  align-items: center;
+  pointer-events: none;
+}
+
+.tl-ghost-col .hourcol-hour {
+  color: var(--ink-3);
+  opacity: 0.7;
+}
+
+.tl-ghost-day .tl-day-name {
+  color: var(--ink-3);
+}
+
+/* Le filet entre deux jours de la zone, comme entre les jours ouverts, du nom du jour jusqu'en bas. */
+.tl-ghost-sep {
+  justify-self: start;
+  align-self: stretch;
+  width: 1px;
+  margin-bottom: -2px;
+  background: var(--line-2);
+  pointer-events: none;
+}
+
+/* Une case vide : ni valeur ni couleur, 34 × 20 px (34 × 32 px pour une case avec flèche), le rayon des cases. */
+.tl-ghost-chip {
+  width: 34px;
+  height: 20px;
+  border-radius: 5px;
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklch, var(--ink) 11%, transparent) 0 1px, transparent 1px 6px),
+    color-mix(in oklch, var(--surface-3) 70%, transparent);
+}
+
+.tl-ghost-chip[data-tall] {
+  height: 32px;
+}
+
+/* Sous les libellés collés à gauche (z-index 1) : le survol de la zone ne les voile pas quand elle passe dessous. */
+.tl-fold-cover {
+  align-self: stretch;
+  position: relative;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: var(--radius-sm);
+}
+
+/* L'étiquette reste collée à gauche de la partie visible de la zone, juste après les libellés. */
+.tl-fold-stick {
+  position: sticky;
+  left: 66px;
+  display: inline-flex;
+  margin: 0 10px;
+}
+
+.tl-fold-cover:hover .fold-label {
+  background: var(--surface-2);
+}
+
+.tl-view {
+  grid-area: view;
+  justify-self: end;
+}
+
+/* Le pas, partagé avec le détail du jour : dans la barre sur grand écran ; sur téléphone, dans le panneau. */
+.tl-step {
+  grid-area: step;
+  display: none;
+}
+
+.model {
+  grid-area: model;
+}
+
+.model > .popover-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  white-space: nowrap;
+  transition: background-color 160ms var(--ease);
+}
+
+.model > .popover-trigger:hover,
+.model > .popover-trigger[aria-expanded='true'] {
+  background: var(--surface-3);
+}
+
+.model-name {
+  font-weight: 700;
+}
+
+.model-res {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.model-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-option {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.model-option:hover {
+  background: var(--surface-2);
+}
+
+.model-option[aria-checked='true'] {
+  background: var(--accent-soft);
+}
+
+.model-option-check {
+  flex: none;
+  width: 16px;
+  padding-top: 2px;
+  color: var(--accent);
+}
+
+.model-option-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.model-option-name {
+  font-weight: 700;
+}
+
+.model-option-meta,
+.model-option-region {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+/* Le type d'affichage de la ligne de temps : le déclencheur du choix du modèle, avec le pictogramme du type. */
+.profile > .popover-trigger {
+  gap: 7px;
+  padding: 0 8px 0 10px;
+}
+
+.profile > .popover-trigger > svg:first-child {
+  color: var(--ink-2);
+}
+
+.profile-option {
+  align-items: flex-start;
+}
+
+.profile-option .model-option-check {
+  align-self: center;
+  padding-top: 0;
+}
+
+.profile-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.profile-option[aria-checked='true'] .profile-tile {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px 5px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.legend-scale {
+  width: 168px;
+}
+
+.legend-bar {
+  height: 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.legend-ticks {
+  position: relative;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.legend-ticks span:first-child {
+  transform: none;
+}
+
+.legend-ticks span:last-child {
+  transform: translateX(-100%);
+}
+
+.legend-unit {
+  flex: none;
+  min-width: 34px;
+  height: 22px;
+  margin-top: -3px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 22px;
+}
+
+button.legend-unit:hover {
+  background: var(--surface-3);
+}
+
+.legend-unit-static {
+  background: none;
+  color: var(--ink-2);
+}
+
+.dock-status {
+  max-width: min(520px, 100%);
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+}
+
+.dock-status[data-tone='error'] {
+  color: var(--danger);
+}
+
+.dock-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.dock-top > * {
+  pointer-events: auto;
+}
+
+/* Sur mobile, les sources tiennent derrière un bouton ; en ligne à partir de 900 px. */
+.credits-menu > .popover-trigger {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.credits-menu > .popover-trigger:hover,
+.credits-menu > .popover-trigger[aria-expanded='true'] {
+  color: var(--ink);
+}
+
+.credits-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.credits-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.credits-list a {
+  font-weight: 600;
+}
+
+.credits-list span {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.credits {
+  display: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 8px;
+  padding-right: 2px;
+  color: var(--ink-2);
+  font-size: 0.625rem;
+  line-height: 1.5;
+  text-shadow:
+    0 0 3px var(--map-halo),
+    0 0 3px var(--map-halo);
+}
+
+.credits a {
+  text-decoration: none;
+}
+
+.credits a:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------ panneau */
+
+.panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-panel);
+  display: flex;
+  flex-direction: column;
+  height: 58dvh;
+  /* La feuille va jusqu'aux bords de l'écran ; son contenu reste hors de l'encoche. */
+  padding: 0 var(--safe-right) 0 var(--safe-left);
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition:
+    height 240ms var(--ease),
+    transform 240ms var(--ease),
+    opacity 240ms var(--ease);
+}
+
+@starting-style {
+  .panel {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+.panel[data-expanded='true'] {
+  height: calc(100dvh - 58px - var(--safe-top));
+}
+
+.panel-grip {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 22px;
+  flex: none;
+  color: var(--ink-3);
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 10px 10px 16px;
+  flex: none;
+}
+
+.panel-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-heading h2 {
+  font-size: 1.125rem;
+  font-weight: 750;
+  font-stretch: 104%;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.panel-heading p {
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.icon-button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.icon-button[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+/* ------------------------------------------------------------ dialog d'un lieu */
+
+/* La poignée de la feuille : un toucher l'agrandit ou la ramène, un glissé passe d'une hauteur à l'autre. */
+.panel-grip-bar {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.sheet-handle {
+  flex: none;
+  touch-action: none;
+}
+
+.place-header {
+  padding-top: 2px;
+}
+
+.place-header h2 {
+  font-size: 1.375rem;
+  line-height: 1.15;
+}
+
+.place-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+
+.place-line svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.place-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.place-dialog .panel-body {
+  padding-bottom: calc(16px + var(--safe-bottom));
+}
+
+/* Les sections : un titre, une précision ou un réglage à droite, leur contenu. */
+.place-section + .place-section,
+.place-section + .measure-card,
+.measure-card + .place-section,
+.cam-preview + .place-section {
+  margin-top: 22px;
+}
+
+.place-section > .section-head {
+  min-height: 32px;
+  margin-bottom: 6px;
+}
+
+.place-section > .section-head h3 {
+  font-size: 1.0625rem;
+}
+
+.place-note {
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  text-wrap: pretty;
+}
+
+.place-text {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.place-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.place-out:hover {
+  text-decoration: underline;
+}
+
+/* Les lignes à pictogramme : une tuile, un titre en gras, une précision, la pastille de statut. */
+.info-list > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 0;
+  color: var(--ink);
+  text-align: left;
+}
+
+.info-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.info-tile-sm {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.info-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.info-text b {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.info-text span {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.info-value {
+  flex: none;
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.info-chevron {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.info-link {
+  border-radius: 0;
+  transition: background-color 160ms var(--ease);
+}
+
+.info-link:hover {
+  background: color-mix(in oklch, var(--surface-2) 60%, transparent);
+}
+
+.status-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--status-neutral);
+}
+
+.status-dot[data-status='good'] {
+  background: var(--status-good);
+}
+
+.status-dot[data-status='watch'] {
+  background: var(--status-watch);
+}
+
+.status-dot[data-status='night'] {
+  background: var(--status-night);
+}
+
+/* La marée du jour : la bande de 0 h à 24 h, la nuit assombrie, les pleines et basses mers. */
+.tide-day svg {
+  display: block;
+  overflow: visible;
+}
+
+.tide-band {
+  fill: var(--surface-2);
+}
+
+.tide-night {
+  fill: var(--night);
+}
+
+.tide-mark {
+  fill: var(--ink-3);
+}
+
+.tide-label {
+  fill: var(--ink-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Le direct autour : la bouée et la webcam les plus proches, côte à côte. */
+.live-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.live-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+}
+
+button.live-tile {
+  transition: background-color 160ms var(--ease);
+}
+
+button.live-tile:hover {
+  background: var(--surface-3);
+}
+
+.live-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 2px;
+  color: var(--ink-2);
+}
+
+.live-name {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 650;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.live-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-good);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--status-good) 28%, transparent);
+}
+
+.live-value {
+  font-size: 1.125rem;
+  font-weight: 750;
+  font-stretch: 96%;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-value-sm {
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-stretch: 100%;
+}
+
+.live-meta {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.live-link:hover {
+  text-decoration: underline;
+}
+
+/* Autour d'une plage : les plages voisines en pastilles. */
+.place-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.place-pill {
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-weight: 650;
+  transition: background-color 160ms var(--ease);
+}
+
+.place-pill:hover {
+  background: var(--surface-3);
+}
+
+/* Bouée : la dernière mesure. */
+.measure-card {
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.measure-when {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.measure-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 4px;
+}
+
+.measure-value {
+  font-size: 2rem;
+  font-weight: 750;
+  font-stretch: 92%;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.measure-value-sm {
+  font-size: 1.125rem;
+  letter-spacing: 0;
+}
+
+.measure-sub {
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.measure-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.measure-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.measure-card .place-out {
+  margin-top: 8px;
+}
+
+/* Bouée : mesuré contre prévu. */
+.compare-chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.compare-scale {
+  fill: var(--ink-3);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.compare-midnight {
+  stroke: var(--line-2);
+}
+
+.compare-forecast {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  stroke-linejoin: round;
+}
+
+.compare-forecast-dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+
+.compare-day {
+  fill: var(--ink-2);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.compare-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.compare-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compare-key-bars {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.compare-key-line,
+.compare-key-forecast {
+  width: 18px;
+  height: 0;
+  border-top: 2px solid var(--ink);
+}
+
+.compare-key-forecast {
+  border-top: 2px dashed var(--accent);
+}
+
+.compare-legend .compare-span {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+.compare-note {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.compare-note b {
+  color: var(--accent);
+}
+
+/* Bouée : l'alerte, au pied du dialog. */
+.buoy-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 22px;
+  padding: 14px 0 4px;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  text-align: left;
+}
+
+/* Webcam : l'aperçu, qui ouvre l'image chez le diffuseur. */
+.cam-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  aspect-ratio: 16 / 9;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 11px, color-mix(in oklch, var(--surface-2) 55%, var(--surface-3)) 11px 12px);
+  color: var(--ink-2);
+  text-align: center;
+  text-wrap: balance;
+}
+
+.cam-icon {
+  color: var(--ink-3);
+}
+
+.cam-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 160ms var(--ease);
+}
+
+.cam-open:hover {
+  background: var(--surface-3);
+}
+
+/* Webcam : ce qui est prévu au même endroit. */
+.forecast-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.forecast-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.forecast-tile-label {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.forecast-tile b {
+  font-size: 1.0625rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.forecast-tile span:last-child {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+/* Téléphone : la barre du bas dans le dialog, sous le contenu du lieu (ou seule, pour un point). */
+.place-lead + .sheet-bar {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.sheet-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sheet-bar-row .clock {
+  flex: 1;
+}
+
+.sheet-bar-row .play {
+  width: 44px;
+  height: 44px;
+}
+
+/* La petite carte d'un lieu : un point (ordinateur), ou un dialog réduit. */
+.place-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 6px 8px 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.place-card-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.place-card > .place-card-icon {
+  margin-right: 2px;
+}
+
+.place-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.place-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.place-card-text b {
+  overflow: hidden;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* La ligne de la carte passe sur deux lignes plutôt que de perdre la distance à la côte ou le vent. */
+/* La ligne elle-même, pas les morceaux qu'elle contient (`.piece`). */
+.place-card-text > span,
+.place-card-text > a {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.place-card-text a {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* Un morceau d'une ligne (« 48,10° N », « 8,7 km de la côte », « vent de terre 24 nd ») ne se coupe pas :
+   la ligne ne passe à la suivante qu'aux « · ». */
+.piece {
+  white-space: nowrap;
+}
+
+.place-card-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.arrow {
+  flex: none;
+  display: inline-block;
+  vertical-align: -2px;
+}
+
+.arrow-none {
+  color: var(--ink-3);
+}
+
+.ov-grid {
+  stroke: var(--line);
+  stroke-dasharray: 2 4;
+}
+
+.ov-base {
+  stroke: var(--line-2);
+}
+
+.ov-area {
+  fill: color-mix(in oklch, var(--ink) 11%, transparent);
+}
+
+.ov-line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+
+.ov-line-thin {
+  stroke-width: 1.2;
+}
+
+.ov-gust {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.2;
+}
+
+.ov-gust {
+  stroke-dasharray: 1.5 3.5;
+  stroke-linecap: round;
+}
+
+/* La seconde courbe d'un couloir (la deuxième houle et sa période), en accent. */
+.ov-accent {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* Une flèche d'un couloir (le vent, le courant) : à la couleur de sa vitesse, sinon neutre. */
+.tl-arrow {
+  fill: var(--ink-2);
+}
+
+/* La provenance du vent sous ses flèches. */
+.tl-mark-text {
+  fill: var(--ink-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* « PM 15:46 » au-dessus d'une pleine mer, « BM 09:38 » sous une basse mer. */
+.tl-tide-mark {
+  fill: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.ov-cursor {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.ov-dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+
+/* Le titre d'une section, et sa précision ou son réglage à droite. */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-head h3 {
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.section-hint {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Valeur sur fond de palette : la couleur dit l'intensité, le chiffre la valeur. */
+.chip {
+  display: inline-block;
+  min-width: 30px;
+  padding: 2px 3px;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.chip[data-empty] {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* Une case sans palette : la pluie nulle, la hauteur de la marée. */
+.chip[data-neutral] {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+/* Le ciel d'une heure dans le tableau de la météo. */
+.hourcol-sky {
+  display: grid;
+  place-items: center;
+  height: 20px;
+  color: var(--ink-2);
+}
+
+/* La direction sous le chiffre : à côté, elle ne tiendrait pas dans une colonne de téléphone. */
+.chip[data-dir] {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding-bottom: 3px;
+}
+
+.chip[data-dir] .arrow {
+  vertical-align: 0;
+}
+
+.segmented-icons .segment {
+  padding: 0 8px;
+}
+
+/* Au pas d'une heure, le tableau défile de côté ; les libellés restent à gauche. */
+.band-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* La place des ombres de survol des colonnes, que le défilement rognerait. */
+  margin: -4px 0;
+  padding: 4px 0;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+.band-scroll .band-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  align-self: stretch;
+  justify-content: center;
+  background: var(--surface);
+  /* Couvre aussi l'écart entre les lignes, que les colonnes ne transparaissent pas dessous. */
+  box-shadow:
+    0 -3px 0 var(--surface),
+    0 3px 0 var(--surface);
+}
+
+/* Le tableau de la ligne de temps : une colonne par pas, alignée sur les libellés de gauche. Le nombre
+   de lignes dépend du modèle (vagues totales ou non) : `grid-template-rows` est posé par TimelineTable. */
+.band {
+  display: grid;
+  align-items: center;
+  row-gap: 5px;
+  margin-top: 12px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* La ligne du filet, dans la colonne des libellés : opaque comme elle, avec son filet. */
+.band-scroll .band-label-sep {
+  background:
+    linear-gradient(var(--line), var(--line)) 0 50% / 100% 1px no-repeat,
+    var(--surface);
+}
+
+.band-label {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1;
+  color: var(--ink-2);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.band-unit {
+  color: var(--ink-3);
+  font-size: 0.6875rem;
+}
+
+.band-label-hour {
+  color: var(--ink-3);
+}
+
+.band-sep {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: var(--line);
+}
+
+.hourcol {
+  grid-row: 1 / -1;
+  display: grid;
+  grid-template-rows: subgrid;
+  justify-items: center;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: inherit;
+  transition: background-color 160ms var(--ease);
+}
+
+.hourcol:hover {
+  background: var(--surface-2);
+  box-shadow:
+    0 -4px 0 var(--surface-2),
+    0 4px 0 var(--surface-2);
+}
+
+.hourcol[aria-current='time'] {
+  background: var(--accent-soft);
+  box-shadow:
+    0 -4px 0 var(--accent-soft),
+    0 4px 0 var(--accent-soft);
+}
+
+.hourcol-hour {
+  color: var(--ink-2);
+}
+
+.hourcol[data-night] .hourcol-hour {
+  color: var(--ink-3);
+}
+
+.hourcol[aria-current='time'] .hourcol-hour {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.hourcol .chip {
+  width: calc(100% - 6px);
+  min-width: 0;
+  max-width: 40px;
+}
+
+.hourcol-dir {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+
+.hourcol[aria-current='time'] .hourcol-dir {
+  color: var(--ink);
+}
+
+.lane-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 2px;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.lane-tick {
+  stroke: var(--line);
+}
+
+.panel-message {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 0.875rem;
+}
+
+.panel-message-detail {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+/* Squelettes de chargement */
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton > * {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(100deg, var(--surface-2) 40%, var(--surface-3) 50%, var(--surface-2) 60%) 0 0 / 300% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-line {
+  height: 16px;
+}
+
+.skeleton-block {
+  height: 92px;
+}
+
+.skeleton-chart {
+  height: 170px;
+}
+
+.skeleton-row {
+  height: 30px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* Sur téléphone, un dialog ou un panneau ouvert prend la place de la barre du bas ; réduit, il la laisse. */
+@media (max-width: 899.98px) {
+  .app[data-panel='dialog'] .dock-area,
+  .app[data-panel='side'] .dock-area {
+    display: none;
+  }
+
+  /* Cible assez grande pour le doigt : 32 px visibles, 44 px au toucher. */
+  .sheet-bar .segment {
+    position: relative;
+    height: 32px;
+  }
+
+  .sheet-bar .segment::before {
+    content: '';
+    position: absolute;
+    inset: -6px 0;
+  }
+
+  .sheet-bar .segmented-icons .segment {
+    min-width: 44px;
+  }
+
+  /* La bascule, le type et le pas sur une ligne de 358 px : le pas un peu plus serré. */
+  .sheet-bar-row-view {
+    gap: 8px;
+  }
+
+  .sheet-step .segment {
+    min-width: 0;
+    padding: 0 7px;
+  }
+
+}
+
+/* --------------------------------------------------------------- grand écran */
+
+@media (min-width: 900px) {
+  .topbar {
+    top: calc(var(--gap) + var(--safe-top));
+    left: calc(var(--gap) + var(--safe-left));
+    right: auto;
+    /* Assez large pour la marque, « Spot, plage ou ville » en entier et le bouton du compte. */
+    width: 388px;
+  }
+
+  .brand-name {
+    display: block;
+  }
+
+  .search-key {
+    display: grid;
+  }
+
+  .layers {
+    top: calc(var(--gap) + 56px + var(--safe-top));
+    left: calc(var(--gap) + var(--safe-left));
+    right: auto;
+    flex-direction: column;
+    gap: 0;
+    width: 156px;
+    padding: 6px;
+    overflow: visible;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .layers-group {
+    flex-direction: column;
+    gap: 1px;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .layers-group + .layers-group {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+  }
+
+  .layers-label {
+    display: block;
+    padding: 2px 10px 3px;
+    color: var(--ink-3);
+    font-size: 0.75rem;
+  }
+
+  .layer {
+    height: 30px;
+    padding: 0 10px;
+    text-align: left;
+  }
+
+  .controls {
+    top: calc(var(--gap) + var(--safe-top));
+    right: calc(var(--gap) + var(--safe-right));
+    transition: right 240ms var(--ease);
+  }
+
+  .dock-area {
+    left: calc(var(--gap) + var(--safe-left));
+    right: calc(var(--gap) + var(--safe-right));
+    bottom: max(var(--gap), var(--safe-bottom));
+    transition: right 240ms var(--ease);
+  }
+
+  .dock {
+    grid-template-columns: auto 136px auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'play clock view step . model'
+      'time time time time time time';
+    gap: 10px 12px;
+    padding: 10px 12px 8px;
+  }
+
+  .tl-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .legend-scale {
+    width: 220px;
+  }
+
+  .credits {
+    display: flex;
+    font-size: 0.6875rem;
+  }
+
+  .credits-menu {
+    display: none;
+  }
+
+  /* Le dialog d'un lieu ou un panneau du compte occupe la colonne de droite ; une petite carte la laisse libre. */
+  .app[data-panel='dialog'] .controls,
+  .app[data-panel='dialog'] .dock-area,
+  .app[data-panel='side'] .controls,
+  .app[data-panel='side'] .dock-area {
+    right: calc(var(--panel-w) + var(--gap) * 2 + var(--safe-right));
+  }
+
+  /* Au milieu de la carte, à gauche du panneau quand il est ouvert. */
+  .chrome > .field-loader {
+    top: 50%;
+  }
+
+  .app[data-panel='dialog'] .field-loader,
+  .app[data-panel='side'] .field-loader {
+    left: calc((100% - var(--panel-w) - var(--gap) * 2) / 2);
+  }
+
+  .panel {
+    top: calc(var(--gap) + var(--safe-top));
+    right: calc(var(--gap) + var(--safe-right));
+    bottom: max(var(--gap), var(--safe-bottom));
+    left: auto;
+    width: var(--panel-w);
+    height: auto;
+    padding: 0;
+    border-radius: var(--radius);
+  }
+
+  .panel[data-expanded='true'] {
+    height: auto;
+  }
+
+  @starting-style {
+    .panel {
+      transform: translateX(24px);
+      opacity: 0;
+    }
+  }
+
+  .panel-grip {
+    display: none;
+  }
+
+  .panel-header {
+    padding-top: 14px;
+  }
+
+  /* La petite carte d'un lieu (un point, un dialog réduit) : en haut à droite, à gauche des boutons de carte. */
+  .chrome > .place-card {
+    position: absolute;
+    top: calc(var(--gap) + var(--safe-top));
+    right: calc(var(--gap) + 50px + var(--safe-right));
+    z-index: var(--z-panel);
+    width: 352px;
+    transition:
+      transform 200ms var(--ease),
+      opacity 200ms var(--ease);
+  }
+
+  @starting-style {
+    .chrome > .place-card {
+      transform: translateY(-6px);
+      opacity: 0;
+    }
+  }
+}
+
+@media (min-width: 900px) and (max-height: 620px) {
+  .layers {
+    flex-direction: row;
+    width: auto;
+    gap: 6px;
+  }
+
+  .layers-group + .layers-group {
+    margin-top: 0;
+    padding-top: 0;
+    padding-left: 6px;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+}
+
+/* ------------------------------------------------------------------- compte */
+
+/* Parcours de compte et de paiement (connexion, profil) : une seule action principale
+   pleine par écran, au style du bouton Lecture (encre pleine, texte en surface). */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease),
+    transform 160ms var(--ease);
+}
+
+.btn-lg {
+  height: 46px;
+  padding: 0 20px;
+  border-radius: 12px;
+  font-size: 0.9375rem;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn-primary {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--ink-2);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn-ghost {
+  color: var(--ink-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+/* Le rouge ne sert qu'au paiement refusé et à la suppression du compte. */
+.btn-danger {
+  color: var(--danger);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-2);
+  /* 16 px : en dessous, iOS zoome sur le champ au moment de la saisie. */
+  font-size: 1rem;
+  outline: none;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hint {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.title-lg {
+  font-size: 1.5rem;
+  font-weight: 750;
+  font-stretch: 104%;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.lead {
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.lead b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.text-link {
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+
+.text-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Message du parcours de compte : neutre, pas d'alerte en rouge. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.notice svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ink-2);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge-outline {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+/* Bouton du compte : une personne pour un visiteur, l'initiale une fois connecté. */
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: 0 2px 0 4px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  font-weight: 750;
+  transition: box-shadow 160ms var(--ease);
+}
+
+.avatar[data-guest] {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+/* Profil ouvert : l'anneau d'accent, comme toute sélection. */
+.avatar[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+
+.avatar-xl {
+  width: 52px;
+  height: 52px;
+  margin: 0 6px 0 0;
+  font-size: 1.25rem;
+}
+
+/* Fenêtre sur ordinateur, feuille sur téléphone. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.overlay-dim {
+  position: absolute;
+  inset: 0;
+  background: oklch(0 0 0 / 0.5);
+  transition: opacity 240ms var(--ease);
+}
+
+.dialog {
+  position: relative;
+  width: 100%;
+  max-height: calc(100dvh - 24px - var(--safe-top));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 calc(20px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(20px + var(--safe-left));
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  outline: none;
+  transition:
+    transform 240ms var(--ease),
+    opacity 240ms var(--ease);
+}
+
+@starting-style {
+  .overlay-dim {
+    opacity: 0;
+  }
+
+  .dialog {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+.dialog-grip,
+.panel-handle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  height: 22px;
+}
+
+.dialog-grip {
+  margin-bottom: 6px;
+}
+
+.dialog-grip::before,
+.panel-handle::before {
+  content: '';
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.dialog-close {
+  position: absolute;
+  top: 10px;
+  right: calc(10px + var(--safe-right));
+}
+
+.dialog .title-lg,
+.dialog .lead {
+  margin-top: 6px;
+}
+
+.dialog .lead-loose {
+  margin-top: 8px;
+}
+
+.dialog-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-form .notice {
+  margin-top: 0;
+}
+
+.or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+.or span {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.dialog-legal {
+  margin-top: 14px;
+}
+
+.round-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--surface-2);
+}
+
+.round-icon + .hint {
+  margin-top: 16px;
+}
+
+.dialog-action {
+  margin-top: 20px;
+}
+
+.dialog-second {
+  margin-top: 6px;
+}
+
+/* Code de connexion : six chiffres au centre, espacés pour se relire d'un coup d'œil. */
+.code-field {
+  margin-top: 16px;
+  align-items: center;
+}
+
+.code-input {
+  max-width: 220px;
+  padding-left: 0.4em;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.code-input::placeholder {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.dialog-center {
+  margin-top: 10px;
+  text-align: center;
+}
+
+/* Profil : il prend la place du panneau d'un point. */
+.profile-header {
+  align-items: center;
+}
+
+.card {
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+/* Dans une carte étroite, un bouton peut passer sur deux lignes. */
+.card .btn {
+  height: auto;
+  min-height: 40px;
+  padding: 9px 12px;
+  text-align: center;
+  white-space: normal;
+}
+
+/* Sur le fond d'une carte, ce qui est en surface-2 disparaîtrait : contour à la place. */
+.card .btn-secondary,
+.rows .segmented {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.card-action {
+  margin-top: 14px;
+}
+
+.section-label {
+  margin: 18px 2px 8px;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.rows {
+  padding: 0 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.rows > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.row > svg {
+  flex: none;
+  color: var(--ink-2);
+  transition: transform 160ms var(--ease);
+}
+
+.row-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-value {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-group[data-open='true'] > .row > svg:last-child {
+  transform: rotate(90deg);
+}
+
+.row-danger,
+.row-danger > svg {
+  color: var(--danger);
+}
+
+.row-body {
+  padding: 2px 0 14px;
+}
+
+.row-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rows .icon-button:hover {
+  background: var(--surface-3);
+}
+
+.favorite-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.favorite-open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 0;
+  color: var(--ink);
+  text-align: left;
+}
+
+.favorite-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-links {
+  margin-top: 14px;
+}
+
+.profile-links a {
+  text-decoration: none;
+}
+
+.profile-links a:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------ premium */
+
+/* Liste à coches. Les coches sont en encre : l'accent reste à ce qui est choisi. */
+.checks {
+  display: grid;
+  gap: 12px;
+}
+
+.checks[data-tight] {
+  gap: 10px;
+}
+
+.card .checks {
+  gap: 8px;
+}
+
+.checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.checks svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.checks b {
+  font-weight: 700;
+}
+
+.badge-premium {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+/* Paiement refusé : avec la suppression du compte, le seul rouge du parcours. */
+.badge-warn {
+  background: color-mix(in oklch, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+/* L'offre : les deux formules, la choisie cerclée d'encre. */
+.dialog .offer-title {
+  margin-top: 12px;
+}
+
+.offer-benefits {
+  margin-top: 16px;
+}
+
+.plans {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.plan {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+  transition: box-shadow 160ms var(--ease);
+}
+
+.plan[aria-checked='true'] {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.plan-radio {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--line-2);
+  transition: box-shadow 160ms var(--ease);
+}
+
+.plan[aria-checked='true'] .plan-radio {
+  box-shadow: inset 0 0 0 6px var(--ink);
+}
+
+.plan-name,
+.plan-price {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-price {
+  margin-left: auto;
+  text-align: right;
+}
+
+.plan-price b {
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.plan-tag {
+  position: absolute;
+  top: -9px;
+  right: 12px;
+}
+
+.offer-action {
+  margin-top: 16px;
+}
+
+/* L'offre Premium porte la couleur de la marque, seule exception à l'accent rare (DESIGN.md) :
+   un halo d'accent en haut de la fenêtre, la pastille et les coches en accent, « sans limite »
+   en accent, la formule choisie sur voile d'accent, cerclée d'accent, son prix en accent, la
+   remise et le bouton en accent plein. */
+.dialog-offer {
+  background:
+    radial-gradient(130% 70% at 50% -18%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 62%),
+    var(--surface);
+}
+
+.dialog-offer .badge-premium {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dialog-offer .offer-title .accent {
+  color: var(--accent);
+}
+
+.dialog-offer .checks svg {
+  color: var(--accent);
+}
+
+.dialog-offer .plan {
+  gap: 14px;
+  padding: 14px 16px;
+  transition:
+    box-shadow 160ms var(--ease),
+    background 160ms var(--ease);
+}
+
+/* Chaque formule a son pictogramme, un calendrier : l'année ou le mois. Il remplace le bouton
+   radio et prend l'accent plein quand la formule est choisie. */
+.dialog-offer .plan-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  transition:
+    background 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.dialog-offer .plan[aria-checked='true'] .plan-icon {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Le prix dans la police des tarifs de la vitrine : fin, large, chiffres tabulaires. */
+.dialog-offer .plan-price b {
+  font-size: 1.875rem;
+  font-weight: 270;
+  font-stretch: 120%;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.dialog-offer .plan[aria-checked='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.dialog-offer .plan[aria-checked='true'] .plan-price b {
+  color: var(--accent);
+}
+
+.dialog-offer .plan-tag {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.dialog-offer .offer-action {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.dialog-offer .offer-action:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 86%, var(--ink));
+}
+
+/* Bienvenue dans Premium. */
+.round-icon-full {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.dialog .welcome-title {
+  margin-top: 16px;
+}
+
+.welcome-checks {
+  margin-top: 18px;
+}
+
+/* Carte d'abonnement du profil, dans ses cinq états. */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card-title {
+  margin-top: 10px;
+  font-weight: 700;
+}
+
+.card-head + .card-title,
+.trial-bar + .card-title {
+  margin-top: 12px;
+}
+
+.card-checks {
+  margin-top: 10px;
+}
+
+.card-note {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.card-note-left,
+.card-second {
+  margin-top: 8px;
+}
+
+.card .notice {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.trial-bar {
+  height: 6px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-3);
+}
+
+.trial-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ink);
+}
+
+/*
+ * Le badge Premium : l'icône de l'appli (le logo en vert d'eau sur sa tuile sombre, dans les deux
+ * thèmes) et « Premium » en accent ; « Aywhoula Premium » dans l'offre et la carte d'abonnement.
+ */
+.pbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px 0 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color 160ms var(--ease);
+}
+
+.pbadge-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #0f1113;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  color: #5fe3c0;
+}
+
+.pbadge-tile svg {
+  width: 13px;
+  height: 13px;
+}
+
+.pbadge-premium {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.pbadge b {
+  font-weight: 750;
+  font-stretch: 108%;
+  letter-spacing: -0.01em;
+}
+
+.pbadge-more {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.pbadge[data-size='md'] {
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px 0 4px;
+  font-size: 0.8125rem;
+}
+
+.pbadge[data-size='md'] .pbadge-tile {
+  width: 22px;
+  height: 22px;
+}
+
+.pbadge[data-size='md'] .pbadge-tile svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* L'étiquette des jours de Premium repliés : « +11 jours », et dessous le logo et « Premium » en accent. */
+.fold-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 14px 8px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    0 2px 10px rgb(0 0 0 / 0.12);
+  white-space: nowrap;
+  transition: background-color 160ms var(--ease);
+}
+
+.fold-label-days {
+  color: var(--ink);
+  font-size: 1.125rem;
+  font-weight: 300;
+  font-stretch: 120%;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.fold-label-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------ alertes */
+
+/* « Mes alertes » et « Nouvelle alerte » prennent la place du panneau d'un point. */
+.panel-foot {
+  flex: none;
+  padding: 12px 16px calc(16px + var(--safe-bottom));
+  border-top: 1px solid var(--line);
+}
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alert-cards {
+  display: grid;
+  gap: 12px;
+}
+
+.alert-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.alert-card-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 700;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.alert-card-name:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+
+.alert-switch {
+  flex: none;
+}
+
+/* Pastilles de lecture, dans une carte : en contour. `.chip` est déjà la pastille de valeur des tableaux. */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 2px 10px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.alert-card-summary {
+  margin-top: 8px;
+}
+
+.alert-card-next {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.alert-card-next svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.alert-card-state,
+.alerts-empty {
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.alerts-empty {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+}
+
+/* Lignes du profil : une alerte et son interrupteur, « Nouvelle alerte ». */
+.row-open {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 0;
+  color: var(--ink);
+  text-align: left;
+}
+
+.row-quiet {
+  color: var(--ink-2);
+}
+
+.row-quiet:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.switch-row {
+  min-height: 42px;
+  justify-content: flex-start;
+}
+
+/* Le formulaire d'une alerte. */
+.field-label {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.spot-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  text-align: left;
+}
+
+.spot-field svg {
+  flex: none;
+  color: var(--ink-2);
+}
+
+.spot-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-block {
+  margin-top: 14px;
+}
+
+.field + .form-block {
+  margin-top: 16px;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.form-row .segmented {
+  min-width: 0;
+}
+
+.form-value {
+  color: var(--ink-2);
+}
+
+/* Curseur à une ou deux poignées ; la partie retenue est aux couleurs de la donnée. */
+.range-field {
+  margin-top: 6px;
+}
+
+.range {
+  position: relative;
+  height: 28px;
+  margin: 0 10px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.range-track {
+  position: absolute;
+  top: 12px;
+  left: -10px;
+  right: -10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.range-fill {
+  position: absolute;
+  top: 11px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.range-knob {
+  position: absolute;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 1px 4px oklch(0 0 0 / 0.5);
+  touch-action: none;
+}
+
+/* Cible assez grande pour le doigt, sans grossir la poignée. */
+.range-knob::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+}
+
+.range-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-3);
+  font-size: 0.6875rem;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.stepper button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.stepper button:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.stepper b {
+  min-width: 52px;
+  text-align: center;
+}
+
+.wind-direction {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wind-direction-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.wind-direction .segmented,
+.wind-direction .hint {
+  margin-top: 8px;
+}
+
+/* Boussole à 16 secteurs : ceux d'où le vent doit venir sont en encre. */
+.compass {
+  flex: none;
+}
+
+.compass-sector {
+  fill: var(--surface-3);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+  transition: fill 160ms var(--ease);
+}
+
+.compass-sector[data-on] {
+  fill: var(--ink);
+}
+
+.compass-sector[role='checkbox'] {
+  cursor: pointer;
+}
+
+.compass-sector[role='checkbox']:hover:not([data-on]) {
+  fill: var(--ink-3);
+}
+
+.compass-sector:focus-visible {
+  outline: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.compass-hub {
+  fill: var(--surface);
+  pointer-events: none;
+}
+
+.compass-mark {
+  fill: var(--ink-2);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Créneaux à cocher : l'accent marque ce qui est choisi. */
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pill {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition:
+    background-color 160ms var(--ease),
+    color 160ms var(--ease);
+}
+
+.pill:hover {
+  color: var(--ink);
+}
+
+.pill[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* L'aperçu : ce que ces réglages auraient donné sur la prévision des jours à venir. */
+.alert-preview {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 0.75rem;
+  transition: opacity 160ms var(--ease);
+}
+
+.alert-preview[data-loading] {
+  opacity: 0.6;
+}
+
+.alert-delete {
+  margin-top: 12px;
+}
+
+/* « Les alertes sur iPhone ». */
+.install-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.install-icon {
+  flex: none;
+  border-radius: 11px;
+}
+
+.dialog .install-head .title-lg {
+  margin-top: 2px;
+}
+
+.dialog .install-lead {
+  margin-top: 14px;
+}
+
+.install-steps {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  font-size: 0.9375rem;
+}
+
+.install-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  counter-increment: step;
+}
+
+.install-steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.install-steps svg {
+  margin: 0 3px;
+  vertical-align: -2px;
+}
+
+@media (min-width: 900px) {
+  .pill {
+    height: 26px;
+    padding: 0 10px;
+  }
+
+  .panel-foot {
+    padding-bottom: 16px;
+  }
+}
+
+@media (min-width: 900px) {
+  .overlay {
+    align-items: center;
+  }
+
+  .dialog {
+    width: 420px;
+    max-height: calc(100dvh - 48px);
+    padding: 28px;
+    border-radius: 16px;
+  }
+
+  .dialog[data-wide] {
+    width: 460px;
+    padding-bottom: 22px;
+  }
+
+  .offer-benefits {
+    margin-top: 20px;
+  }
+
+  .plans {
+    margin-top: 22px;
+  }
+
+  @starting-style {
+    .dialog {
+      transform: translateY(8px);
+      opacity: 0;
+    }
+  }
+
+  .dialog-grip,
+  .panel-handle {
+    display: none;
+  }
+
+  .dialog-close {
+    right: 10px;
+  }
+
+  .input {
+    font-size: 0.9375rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

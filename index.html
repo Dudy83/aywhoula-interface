@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#17191c" />
+    <meta name="description" content="Prévisions de vagues et de vent pour le surf et les sports nautiques : carte animée, spots, bouées, webcams." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+    <title>Aywhoula · vagues et vent</title>
+    <script>
+      // Le thème est posé avant le premier affichage, pour que l'écran de démarrage
+      // prenne tout de suite la bonne couleur. Même règle que useResolvedTheme :
+      // le choix enregistré, sinon le thème du système. App.tsx prend ensuite la main.
+      (function () {
+        var theme;
+        try {
+          theme = JSON.parse(localStorage.getItem('aywhoula')).state.theme;
+        } catch (e) {
+          // Rien d'enregistré, ou stockage indisponible : thème du système.
+        }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.dataset.theme = theme;
+        if (theme === 'light') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#eef0f2');
+      })();
+    </script>
+    <style>
+      /* Tout ce qui s'affiche avant le chargement de l'app est écrit ici et non dans
+         src/styles.css : l'écran de démarrage, et l'animation de la marque, qui sert
+         aussi à la pastille de chargement de l'app (.field-loader). */
+
+      /* ---- Marque animée : la houle défile sous le point --------------------------
+         La vague est un tiret posé sur un tracé de quatre périodes (pathLength 400,
+         soit 100 par période) : le tracé avance d'une période pendant que le tiret
+         recule d'autant, si bien que la houle défile sans que le trait se déplace. */
+      .logo-anim {
+        display: block;
+        overflow: visible;
+      }
+
+      .logo-anim-wave {
+        animation: logo-swell 1.6s linear infinite;
+      }
+
+      /* Le point suit la houle : en haut quand la crête passe dessous, en bas au creux. */
+      .logo-anim-dot {
+        animation: logo-bob 0.8s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+      }
+
+      @keyframes logo-swell {
+        from {
+          transform: translateX(0);
+          stroke-dashoffset: -200;
+        }
+        to {
+          transform: translateX(12px);
+          stroke-dashoffset: -100;
+        }
+      }
+
+      @keyframes logo-bob {
+        from {
+          transform: translateY(-0.9px);
+        }
+        to {
+          transform: translateY(0.9px);
+        }
+      }
+
+      /* ---- Écran de démarrage -----------------------------------------------------
+         Il couvre la carte tant qu'elle n'a pas ses premières données ; src/ui/splash.ts
+         y écrit le run en cours de lecture, puis le retire. Les couleurs sont celles
+         des jetons de styles.css : --map-land, --ink, --ink-2 et --accent des deux
+         thèmes. Au-dessus de tout : --z-popover vaut 30. */
+      #splash {
+        --mark: clamp(80px, 23vmin, 128px);
+        --splash-accent: oklch(0.86 0.125 176);
+        --splash-muted: oklch(0.81 0 0);
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: #17191c;
+        color: oklch(0.965 0 0);
+        font:
+          500 0.8125rem/1.4 'Archivo Variable',
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        transition:
+          opacity 360ms cubic-bezier(0.25, 1, 0.5, 1),
+          visibility 0s linear 360ms;
+      }
+
+      html[data-theme='light'] #splash {
+        --splash-accent: oklch(0.5 0.1 182);
+        --splash-muted: oklch(0.37 0 0);
+        background: #eef0f2;
+        color: oklch(0.2 0 0);
+      }
+
+      /* Sortie : fondu, la marque s'avançant un peu vers l'écran. */
+      #splash[data-done] {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .splash-lockup {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-bottom: 16vh;
+        transition: transform 360ms cubic-bezier(0.25, 1, 0.5, 1);
+      }
+
+      #splash[data-done] .splash-lockup {
+        transform: scale(1.06);
+      }
+
+      .splash-lockup .logo-anim {
+        width: var(--mark);
+        height: var(--mark);
+        color: var(--splash-accent);
+      }
+
+      /* Le nom, en tracés : il s'affiche avant que la police soit chargée. Le dessin
+         de la marque laisse du vide sous la vague ; le nom remonte d'autant. */
+      .splash-name {
+        display: block;
+        width: calc(var(--mark) * 2.2);
+        height: auto;
+        margin-top: calc(var(--mark) * -0.14);
+        overflow: visible;
+        fill: currentColor;
+      }
+
+      .splash-status {
+        min-height: 1.4em;
+        margin: 18px 0 0;
+        color: var(--splash-muted);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .splash-status span {
+        display: inline-block;
+        animation: splash-rise 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        --rise: 5px;
+      }
+
+      /* La mer, vue du bord : huit lignes de houle, serrées et fines vers l'horizon,
+         longues et creuses au premier plan. Chacune avance à la vitesse de sa longueur
+         d'onde (en eau profonde, une houle longue va plus vite). Une ligne est une
+         bande de couleur découpée par un motif de vague répété ; elle glisse d'une
+         longueur d'onde, sur le compositeur, donc sans à-coups pendant que l'app démarre. */
+      .splash-sea {
+        position: absolute;
+        inset: auto 0 0;
+        height: 42%;
+        overflow: hidden;
+        pointer-events: none;
+        animation: splash-fade 900ms ease-out both;
+      }
+
+      .splash-sea i {
+        position: absolute;
+        left: calc(var(--l) * -1);
+        bottom: var(--y);
+        width: calc(100% + var(--l));
+        height: var(--a);
+        background: currentColor;
+        opacity: var(--o);
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 20' preserveAspectRatio='none'%3E%3Cpath d='M0 18c30 0 30-16 60-16s30 16 60 16' fill='none' stroke='%23000' stroke-width='1.25' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E")
+          0 0 / var(--l) 100% repeat-x;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 20' preserveAspectRatio='none'%3E%3Cpath d='M0 18c30 0 30-16 60-16s30 16 60 16' fill='none' stroke='%23000' stroke-width='1.25' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E")
+          0 0 / var(--l) 100% repeat-x;
+        animation: splash-drift var(--t) linear var(--d) infinite;
+      }
+
+      /* Entrée : la vague se trace, le point apparaît, le nom monte lettre après
+         lettre dans le sens de la houle. Elle ne retarde rien : l'écran s'efface dès
+         que la carte est prête, entrée finie ou non. Sans animation, tout est visible. */
+      #splash .logo-anim-wave {
+        animation:
+          splash-draw 560ms cubic-bezier(0.22, 1, 0.36, 1) both,
+          logo-swell 1.6s linear infinite;
+      }
+
+      #splash .logo-anim-dot {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation:
+          splash-pop 420ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both,
+          logo-bob 0.8s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+      }
+
+      .splash-name path {
+        --rise: 16px;
+        animation: splash-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        animation-delay: calc(200ms + var(--i) * 32ms);
+      }
+
+      @keyframes splash-draw {
+        from {
+          stroke-dasharray: 0 1000;
+        }
+      }
+
+      @keyframes splash-pop {
+        from {
+          opacity: 0;
+          scale: 0.4;
+        }
+      }
+
+      @keyframes splash-rise {
+        from {
+          opacity: 0;
+          transform: translateY(var(--rise));
+        }
+      }
+
+      @keyframes splash-fade {
+        from {
+          opacity: 0;
+        }
+      }
+
+      @keyframes splash-drift {
+        to {
+          transform: translateX(var(--l));
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .logo-anim *,
+        #splash * {
+          animation: none !important;
+        }
+
+        #splash,
+        .splash-lockup {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="splash" role="status" aria-label="Chargement d’Aywhoula">
+      <div class="splash-sea" aria-hidden="true">
+        <!-- De l'horizon au premier plan : longueur d'onde (l), creux (a), hauteur dans la
+             bande (y), opacité (o), durée d'une période (t, proportionnelle à √l), déphasage (d). -->
+        <i style="--l: 9vmin; --a: 0.5vmin; --y: 96%; --o: 0.07; --t: 3.5s; --d: -1s"></i>
+        <i style="--l: 12vmin; --a: 0.7vmin; --y: 88%; --o: 0.08; --t: 4s; --d: -3.1s"></i>
+        <i style="--l: 16vmin; --a: 0.95vmin; --y: 78.5%; --o: 0.1; --t: 4.7s; --d: -0.4s"></i>
+        <i style="--l: 22vmin; --a: 1.3vmin; --y: 67%; --o: 0.12; --t: 5.5s; --d: -4.7s"></i>
+        <i style="--l: 30vmin; --a: 1.8vmin; --y: 53.5%; --o: 0.14; --t: 6.4s; --d: -2.2s"></i>
+        <i style="--l: 40vmin; --a: 2.4vmin; --y: 38%; --o: 0.16; --t: 7.4s; --d: -6s"></i>
+        <i style="--l: 53vmin; --a: 3.2vmin; --y: 20.5%; --o: 0.19; --t: 8.5s; --d: -3.6s"></i>
+        <i style="--l: 70vmin; --a: 4.2vmin; --y: 1%; --o: 0.22; --t: 9.8s; --d: -7.5s"></i>
+      </div>
+      <div class="splash-lockup">
+        <!-- Le même dessin que AnimatedMark (src/ui/common.tsx) : à modifier ensemble. -->
+        <svg class="logo-anim" viewBox="0 0 28 28" aria-hidden="true">
+          <circle class="logo-anim-dot" cx="19.5" cy="8.5" r="3" fill="currentColor" />
+          <path
+            class="logo-anim-wave"
+            d="M-21.5 18.5c3 0 3-3.4 6-3.4s3 3.4 6 3.4 3-3.4 6-3.4 3 3.4 6 3.4 3-3.4 6-3.4 3 3.4 6 3.4 3-3.4 6-3.4 3 3.4 6 3.4"
+            pathLength="400"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-dasharray="183 1000"
+            stroke-dashoffset="-200"
+          />
+        </svg>
+        <!-- « Aywhoula » en Archivo Variable, graisse 750, chasse 108 %, une lettre par tracé
+             (extrait de la police : à régénérer si elle change). -->
+        <svg class="splash-name" viewBox="0 -74 511.2 95" aria-hidden="true">
+          <path style="--i: 0" d="M1 0L29.7 -68.7L49.9 -68.7L78.7 0L60 0L55.2 -12.4L23.5 -12.4L18.7 0ZM28.6 -25.5L50.1 -25.5L44.3 -40.9Q43.8 -42.1 43.2 -43.7Q42.6 -45.3 42 -47.2Q41.4 -49.2 40.8 -51Q40.2 -52.8 39.7 -54.1L39.1 -54.1Q38.5 -52.1 37.6 -49.7Q36.7 -47.2 36 -44.8Q35.2 -42.5 34.5 -40.9Z" />
+          <path style="--i: 1" d="M89.7 19.6Q86 19.6 83.4 19.1Q80.9 18.6 79.7 18.1L79.7 8.1L86.6 8.1Q89.7 8.1 91.9 7Q94.2 5.8 95.5 4Q96.9 2.1 97.7 0L75.4 -52.7L92.3 -52.7L101.3 -28.6Q102 -27 102.8 -24.5Q103.7 -22 104.5 -19.3Q105.4 -16.7 106.1 -14.7L106.6 -14.7Q106.9 -15.8 107.5 -17.5Q108.1 -19.3 108.7 -21.3Q109.3 -23.4 109.9 -25.3Q110.6 -27.3 111 -28.7L119 -52.7L135 -52.7L115.7 -3.1Q113.7 1.7 111.4 5.9Q109.2 10 106.3 13.1Q103.4 16.2 99.3 17.9Q95.2 19.6 89.7 19.6Z" />
+          <path style="--i: 2" d="M153.4 0L134.6 -52.7L151.3 -52.7L158.4 -28.6Q159 -26.8 159.5 -24.5Q160.1 -22.2 160.5 -20.3Q161 -18.4 161.3 -17.1L161.9 -17.1Q162.5 -19 162.9 -21Q163.4 -23.1 163.9 -25.2Q164.5 -27.2 165 -28.7L171.5 -52.7L188.2 -52.7L195 -28.6Q195.3 -27.4 195.8 -25.3Q196.3 -23.3 196.8 -21Q197.4 -18.8 197.8 -17.1L198.5 -17.1Q198.9 -18.7 199.4 -20.7Q200 -22.8 200.5 -24.9Q201 -27 201.5 -28.5L208.5 -52.7L223.9 -52.7L205 0L189.2 0L182.9 -22.7Q182.3 -24.7 181.7 -27Q181.1 -29.3 180.5 -31.5Q180 -33.7 179.6 -35.2L179 -35.2Q178.7 -34 178.2 -32.1Q177.8 -30.2 177.2 -27.8Q176.7 -25.5 175.8 -22.8L169.4 0Z" />
+          <path style="--i: 3" d="M229.5 0L229.5 -72.4L245.2 -72.4L245.2 -46.6L245.9 -46.6Q248 -49 250.7 -50.7Q253.5 -52.3 256.7 -53.1Q259.9 -53.9 263.3 -53.9Q269.4 -53.9 273.7 -51.8Q278.1 -49.7 280.3 -45.3Q282.5 -41 282.5 -34.1L282.5 0L266.8 0L266.8 -31.7Q266.8 -34.3 266.2 -36.1Q265.6 -37.9 264.3 -39.1Q263 -40.3 261.2 -40.8Q259.5 -41.4 257.2 -41.4Q253.8 -41.4 251.1 -39.9Q248.5 -38.4 246.8 -35.8Q245.2 -33.2 245.2 -29.8L245.2 0Z" />
+          <path style="--i: 4" d="M321.3 1.2Q311.9 1.2 305.4 -1.8Q298.8 -4.9 295.3 -11Q291.8 -17 291.8 -26.3Q291.8 -35.7 295.3 -41.8Q298.8 -47.9 305.4 -50.9Q311.9 -53.9 321.3 -53.9Q330.5 -53.9 337.2 -50.9Q343.8 -47.9 347.3 -41.8Q350.8 -35.7 350.8 -26.3Q350.8 -17 347.3 -11Q343.8 -4.9 337.2 -1.8Q330.5 1.2 321.3 1.2ZM321.3 -10.3Q325.8 -10.3 328.8 -12Q331.8 -13.8 333.3 -17Q334.7 -20.3 334.7 -25L334.7 -27.6Q334.7 -32.4 333.3 -35.6Q331.8 -38.9 328.8 -40.6Q325.8 -42.3 321.3 -42.3Q316.6 -42.3 313.7 -40.6Q310.7 -38.9 309.3 -35.6Q307.8 -32.4 307.8 -27.6L307.8 -25Q307.8 -20.3 309.3 -17Q310.7 -13.8 313.7 -12Q316.6 -10.3 321.3 -10.3Z" />
+          <path style="--i: 5" d="M379.3 1.2Q370 1.2 365 -3.6Q359.9 -8.5 359.9 -18.7L359.9 -52.7L375.6 -52.7L375.6 -20.9Q375.6 -18.4 376.3 -16.5Q377 -14.7 378.2 -13.6Q379.4 -12.5 381.2 -11.9Q383 -11.3 385.3 -11.3Q388.6 -11.3 391.3 -12.8Q394 -14.3 395.6 -16.9Q397.2 -19.6 397.2 -22.9L397.2 -52.7L412.9 -52.7L412.9 0L400 0L399 -7.8L398.3 -7.8Q396.2 -4.9 393.2 -2.8Q390.1 -0.8 386.6 0.2Q383 1.2 379.3 1.2Z" />
+          <path style="--i: 6" d="M424.8 0L424.8 -72.4L440.5 -72.4L440.5 0Z" />
+          <path style="--i: 7" d="M468.7 1.2Q465.2 1.2 461.8 0.6Q458.4 -0.1 455.6 -1.7Q452.9 -3.4 451.2 -6.4Q449.5 -9.3 449.5 -13.8Q449.5 -19.7 452.3 -23.3Q455.1 -26.9 460.2 -28.8Q465.3 -30.8 472.3 -31.4Q479.3 -32.1 487.9 -32.1L487.9 -35.1Q487.9 -37.7 486.8 -39.4Q485.7 -41.2 483.5 -42.1Q481.3 -42.9 477.7 -42.9Q474.4 -42.9 472.1 -42.3Q469.8 -41.7 468.5 -40.4Q467.3 -39.2 467.3 -37.7L467.3 -36.7L451.8 -36.7Q451.7 -37.1 451.6 -37.5Q451.6 -37.9 451.6 -38.4Q451.6 -43.2 454.7 -46.6Q457.9 -50 463.8 -51.9Q469.7 -53.9 478 -53.9Q486 -53.9 491.7 -52.1Q497.4 -50.3 500.5 -46.5Q503.6 -42.7 503.6 -36.8L503.6 -14.1Q503.6 -12.3 504.5 -11.3Q505.5 -10.3 507 -10.3L510.9 -10.3L510.9 -0.6Q509.7 0 507.2 0.6Q504.8 1.1 501.7 1.1Q497.9 1.1 495.4 0.3Q492.9 -0.6 491.4 -2.2Q489.9 -3.8 489.3 -6.1L488.6 -6.1Q486.4 -3.9 483.5 -2.2Q480.6 -0.6 476.9 0.3Q473.3 1.2 468.7 1.2ZM473.9 -9.8Q476.5 -9.8 478.9 -10.5Q481.4 -11.2 483.4 -12.5Q485.5 -13.9 486.7 -15.8Q487.9 -17.7 487.9 -20.1L487.9 -23.2Q480.7 -23.2 475.7 -22.4Q470.7 -21.6 468.1 -19.9Q465.5 -18.2 465.5 -15.3Q465.5 -13.3 466.6 -12.1Q467.7 -10.9 469.6 -10.4Q471.5 -9.8 473.9 -9.8Z" />
+        </svg>
+        <p class="splash-status"></p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
