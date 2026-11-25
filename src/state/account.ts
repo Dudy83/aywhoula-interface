@@ -23,6 +23,7 @@ import { forgetPush, refreshPush } from '../data/push';
 import { startSync, stopSync } from '../data/sync';
 import { formatCoord, type Units } from '../lib/units';
 import { mapApi } from '../map/api';
+import { authCall, authClient } from './auth-client';
 import type { DayStep, DayView, Selection, ThemeChoice } from './store';
 import { useStore } from './store';
 
@@ -74,7 +75,7 @@ export interface Me {
 /** Favoris de la version gratuite. Ceux déjà enregistrés au-delà sont gardés ; le suivant ouvre l'offre. */
 export const FREE_FAVORITES = 3;
 
-/** Action à reprendre une fois connecté : le lien de connexion la ramène dans l'adresse (`?reprise=`). */
+/** Action à reprendre une fois connecté. Au retour de Google, elle revient dans l'adresse (`?reprise=`). */
 export type Resume = { action: 'profile' } | { action: 'trial'; plan: Plan };
 
 const PLAN_WORD: Record<Plan, string> = { yearly: 'annuel', monthly: 'mensuel' };
@@ -91,7 +92,8 @@ function decodeResume(value: string | null): Resume | null {
 /** Ce qui s'affiche par-dessus l'appli : fenêtre sur ordinateur, feuille sur téléphone. */
 export type Overlay =
   | { kind: 'signin'; resume: Resume; email?: string; notice?: string }
-  | { kind: 'sent'; resume: Resume; email: string }
+  /** L'étape du code. `code` : rempli par le lien de l'email ; il attend alors que la personne touche « Me connecter ». */
+  | { kind: 'sent'; resume: Resume; email: string; code?: string }
   | { kind: 'delete' }
   /**
    * L'offre Premium. `start` : la session Checkout s'ouvre tout de suite (retour d'un lien de
@@ -172,26 +174,120 @@ function offerFromSync(reason?: 'merge'): void {
   useAccount.setState({ overlay: { kind: 'offer', plan: 'yearly', ...overlay, ...(reason === 'merge' ? { notice: FAVORITES_NOTICE } : {}) } });
 }
 
-/** Adresse du parcours Google, avec l'action à reprendre au retour. */
-export const googleSignInUrl = (resume: Resume): string => `/api/auth/google?${new URLSearchParams({ resume: encodeResume(resume) })}`;
+let providers: Promise<{ google: boolean }> | null = null;
 
-/** Demande le lien de connexion, puis montre « Vérifiez votre boîte mail ». */
+/**
+ * Les moyens de connexion branchés sur le serveur (`GET /api/auth/providers`) : lus une fois, à la première
+ * ouverture de la connexion, puis gardés en mémoire. Si la demande échoue, Google passe pour absent : son
+ * bouton reste caché.
+ */
+export function loadProviders(): Promise<{ google: boolean }> {
+  providers ??= api<{ google?: unknown }>('/api/auth/providers').then(
+    (p) => ({ google: p?.google === true }),
+    () => ({ google: false }),
+  );
+  return providers;
+}
+
+/*
+ * Better-Auth répond par un code d'erreur, en anglais : voici les phrases de l'appli pour chacun, sinon pour
+ * le statut. Un code usé par trois essais ratés est mort, comme un code expiré : il en faut un autre.
+ */
+const SEND_ERRORS = {
+  INVALID_EMAIL: 'Demande invalide.',
+  429: 'Trop de demandes de lien depuis cette connexion. Réessayez dans une heure.',
+};
+const CODE_ERRORS = {
+  INVALID_OTP: 'Ce code n’est pas le bon.',
+  OTP_EXPIRED: 'Ce code ne marche plus. Demandez un nouveau lien.',
+  TOO_MANY_ATTEMPTS: 'Ce code ne marche plus. Demandez un nouveau lien.',
+  429: 'Trop d’essais depuis cette connexion. Réessayez dans une heure.',
+};
+/** Les refus qu'écrit le serveur d'Aywhoula, avec leur phrase : plafonds d'envoi, email qui ne part pas. */
+const SERVER_ERRORS = ['ADDRESS_LIMIT', 'SITE_LIMIT', 'EMAIL_FAILED'];
+
+const sameAddress = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Le compte de cette adresse est-il connecté ici ? */
+export function signedInAs(email: string): boolean {
+  const { me } = useAccount.getState();
+  return me !== null && sameAddress(me.email, email);
+}
+
+/**
+ * La connexion en cours : l'adresse et l'action à reprendre, gardées dans le navigateur le temps de vie du
+ * code (15 minutes). Le lien de l'email peut s'ouvrir dans un autre onglet du même appareil : c'est là qu'il
+ * retrouve quoi reprendre. Rien du compte lui-même n'est enregistré, et l'adresse n'y reste pas : elle est
+ * effacée à la connexion, ou à la première ouverture de l'appli passé ce délai.
+ */
+const PENDING_KEY = 'aywhoula:connexion';
+const PENDING_MS = 15 * 60_000;
+
+function rememberSignIn(email: string, resume: Resume): void {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify({ email: email.trim().toLowerCase(), resume: encodeResume(resume), at: Date.now() }));
+  } catch {
+    // Stockage refusé : le lien de l'email ouvrira le profil.
+  }
+}
+
+function forgetSignIn(): void {
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // Rien à oublier.
+  }
+}
+
+/** La connexion en cours, si elle a moins de 15 minutes. Périmée ou illisible, elle est effacée. */
+function pendingSignIn(): { email: string; resume: Resume | null } | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PENDING_KEY) ?? 'null') as { email?: unknown; resume?: unknown; at?: unknown } | null;
+    if (saved === null) return null;
+    if (typeof saved.email === 'string' && typeof saved.at === 'number' && Math.abs(Date.now() - saved.at) <= PENDING_MS) {
+      return { email: saved.email, resume: decodeResume(typeof saved.resume === 'string' ? saved.resume : null) };
+    }
+  } catch {
+    // Illisible : effacée comme une connexion périmée.
+  }
+  forgetSignIn();
+  return null;
+}
+
+/** L'action que la connexion de cette adresse devait reprendre, si elle a été demandée ici il y a moins de 15 minutes. */
+function pendingResume(email: string): Resume | null {
+  const pending = pendingSignIn();
+  return pending && sameAddress(pending.email, email) ? pending.resume : null;
+}
+
+/** Demande le code de connexion, puis montre « Vérifiez votre boîte mail ». */
 export async function requestLoginLink(email: string, resume: Resume): Promise<void> {
-  await api('/api/auth/email', { json: { email, resume: encodeResume(resume) } });
+  await authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' }), SEND_ERRORS, SERVER_ERRORS);
+  rememberSignIn(email, resume);
   useAccount.setState({ overlay: { kind: 'sent', resume, email } });
 }
 
 /**
- * Le code à 6 chiffres reçu dans le même email, saisi ici : il ouvre la session dans cette
- * appli même, puis reprend l'action en cours. Sur iPhone, le lien s'ouvre dans Safari, dont
- * les cookies ne sont pas ceux de l'appli installée : le code est le chemin qui la connecte.
+ * Le code à 6 chiffres de l'email, saisi ici ou rempli par son lien : il ouvre la session dans cette
+ * appli même, puis reprend l'action en cours. Sur iPhone, le lien s'ouvre dans Safari, dont les cookies
+ * ne sont pas ceux de l'appli installée : le code saisi est le chemin qui la connecte.
  */
-export async function signInWithCode(email: string, code: string): Promise<void> {
-  const { resume } = await api<{ resume: string | null }>('/api/auth/email/code', { json: { email, code } });
+export async function signInWithCode(email: string, code: string, resume: Resume): Promise<void> {
+  await authCall(authClient.signIn.emailOtp({ email, otp: code }), CODE_ERRORS);
+  forgetSignIn();
   await refreshAccount();
   useAccount.setState({ overlay: null });
-  const action = decodeResume(resume);
-  if (action) runResume(action);
+  runResume(resume);
+}
+
+/**
+ * « Continuer avec Google » : le navigateur part chez Google. Au retour, l'appli lit `?reprise=…` (connecté,
+ * avec l'action à reprendre) ou `?connexion=google` (le parcours n'a pas abouti).
+ */
+export async function signInWithGoogle(resume: Resume): Promise<void> {
+  const callbackURL = `/?${new URLSearchParams({ reprise: encodeResume(resume) })}`;
+  // Un refus du serveur se dit comme le retour d'un parcours qui a échoué.
+  await authCall(authClient.signIn.social({ provider: 'google', callbackURL, errorCallbackURL: '/?connexion=google' }), { default: NOTICES.google });
 }
 
 /**
@@ -356,9 +452,11 @@ export async function refreshAccount(): Promise<boolean> {
     return false;
   }
   const previous = useAccount.getState();
-  const wasSigned = previous.status === 'signed';
-  useAccount.setState({ status: 'signed', me });
-  if (!wasSigned) {
+  // Un compte arrive : à la première réponse connectée, ou parce que ce n'est plus celui d'avant (le lien d'un
+  // email de connexion ouvert ici pour une autre adresse). Ses alertes et sa synchronisation repartent de zéro.
+  const arrived = previous.status !== 'signed' || previous.me?.id !== me.id;
+  useAccount.setState({ status: 'signed', me, ...(arrived ? { alerts: null } : {}) });
+  if (arrived) {
     void api('/api/me/timezone', { method: 'PUT', json: { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } }).catch(() => undefined);
     void startSync(me, SYNC_HOOKS);
     // L'abonnement aux notifications de cet appareil suit le compte connecté.
@@ -382,7 +480,7 @@ const SYNC_HOOKS = { refresh: refreshAccount, offer: offerFromSync, premium: isP
 export async function signOut(): Promise<void> {
   // Avant de fermer la session : cet appareil ne doit plus recevoir les alertes du compte.
   await forgetPush();
-  await api('/api/auth/logout', { method: 'POST' });
+  await authCall(authClient.signOut());
   stopSync();
   useStore.getState().setSyncedAccount(null);
   useAccount.setState({ status: 'guest', me: null, overlay: null, alerts: null });
@@ -471,11 +569,13 @@ async function awaitPremium(): Promise<void> {
   if (isPremium()) show('ready');
 }
 
-const NOTICES: Record<string, string> = {
-  expire: 'Ce lien a expiré ou a déjà servi. Demandez-en un nouveau.',
+const NOTICES = {
   google: 'La connexion avec Google n’a pas abouti. Réessayez, ou recevez un lien par email.',
   'google-email': 'Google n’a pas confirmé cette adresse email. Recevez plutôt un lien par email.',
 };
+
+/** Les codes d'erreur de Better-Auth qui veulent dire « Google n'a pas confirmé cette adresse ». */
+const UNCONFIRMED = ['email_not_verified', 'account_not_linked'];
 
 /**
  * À l'ouverture de l'appli : lit les paramètres d'adresse qui concernent le compte, les
@@ -485,8 +585,10 @@ const NOTICES: Record<string, string> = {
  * - `?panneau=profil` : le profil ;
  * - `?offre=annuel` ou `?offre=mensuel` (liens de la vitrine) : l'offre, avec ce choix ;
  * - `?premium=bienvenue` et `?premium=offre` : les retours de Stripe, paiement fait ou abandonné ;
- * - `?reprise=…` : retour d'un lien de connexion, avec l'action à reprendre ;
- * - `?connexion=…` : un lien expiré ou un parcours Google qui n'a pas abouti ;
+ * - `?reprise=…` : retour de Google, connecté, avec l'action à reprendre ;
+ * - `?connexion=google` (et `&error=…`, de Better-Auth) : un parcours Google qui n'a pas abouti ;
+ * - `?connexion=<adresse>&code=<code>` : le lien de l'email de connexion. Il ouvre l'étape du code, adresse et
+ *   code remplis : rien ne part tant que la personne n'a pas touché « Me connecter » ;
  * - `?panneau=alertes` et `?panneau=alerte` : « Mes alertes » et « Nouvelle alerte » ;
  * - `?lieu=…&heure=…` : le lien profond d'une notification ou d'un email d'alerte.
  */
@@ -501,15 +603,33 @@ export async function startAccount(): Promise<void> {
   const offer = q.has('offre') ? (planOf(q.get('offre')) ?? 'yearly') : null;
   const stripeReturn = q.get('premium');
   const resume = decodeResume(q.get('reprise'));
-  const notice = NOTICES[q.get('connexion') ?? ''];
-  const handled = ['compte', 'panneau', 'offre', 'premium', 'session_id', 'reprise', 'connexion', 'lieu', 'heure'].filter((key) => q.has(key));
+  const connexion = q.get('connexion');
+  const code = q.get('code');
+  // Le lien de l'email porte une adresse ; tout autre `?connexion=` est un retour de Google qui a échoué.
+  const link = connexion?.includes('@') && connexion.length <= 254 ? { email: connexion, code: code && /^[0-9]{6}$/.test(code) ? code : null } : null;
+  const notice = connexion && !link ? NOTICES[UNCONFIRMED.includes(q.get('error') ?? '') ? 'google-email' : 'google'] : null;
+  // Avec `connexion` partent son code et ce que Better-Auth ajoute à un retour en erreur.
+  const handled = ['compte', 'panneau', 'offre', 'premium', 'session_id', 'reprise', 'connexion', 'lieu', 'heure', ...(connexion === null ? [] : ['code', 'error', 'error_description'])].filter((key) => q.has(key));
   if (handled.length > 0) {
     for (const key of handled) q.delete(key);
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
   }
 
+  // Une connexion en cours restée là plus de 15 minutes s'efface à cette lecture.
+  pendingSignIn();
+
   const signed = await refreshAccount();
-  if (notice && !signed) openSignIn({ action: 'profile' }, { notice });
+  if (link && signedInAs(link.email)) {
+    // Ce compte est déjà connecté ici (le code a servi dans un autre onglet) : il ne reste qu'à reprendre.
+    const pending = pendingResume(link.email);
+    forgetSignIn();
+    runResume(pending ?? { action: 'profile' });
+  } else if (link) {
+    const pending = pendingResume(link.email) ?? { action: 'profile' };
+    // Sans code lisible, on repart de l'adresse.
+    if (link.code) useAccount.setState({ overlay: { kind: 'sent', resume: pending, email: link.email, code: link.code } });
+    else openSignIn(pending, { email: link.email });
+  } else if (notice && !signed) openSignIn({ action: 'profile' }, { notice });
   else if (stripeReturn === 'bienvenue' && signed) void awaitPremium();
   else if (resume && signed) runResume(resume);
   else if (offer || stripeReturn === 'offre') {

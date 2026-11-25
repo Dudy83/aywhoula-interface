@@ -1,7 +1,7 @@
 import { CircleAlert, Mail } from 'lucide-react';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { errorMessage } from '../../data/api';
-import { closeOverlay, googleSignInUrl, openSignIn, refreshAccount, requestLoginLink, signInWithCode, type Overlay } from '../../state/account';
+import { closeOverlay, loadProviders, openSignIn, refreshAccount, requestLoginLink, signedInAs, signInWithCode, signInWithGoogle, type Overlay } from '../../state/account';
 import { Dialog } from './Dialog';
 
 /** Le logo de Google, à ses couleurs : c'est sa marque, pas une couleur de l'interface. */
@@ -26,12 +26,22 @@ export function Notice({ children }: { children: string }) {
   );
 }
 
-/** Écran `connexion` : l'adresse email pour recevoir le lien, ou Google. */
+/** Écran `connexion` : l'adresse email pour recevoir le lien, ou Google quand le serveur l'a branché. */
 export function SignInDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'signin' }> }) {
   const [email, setEmail] = useState(overlay.email ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // « Continuer avec Google » ne paraît que si le serveur dit que Google est branché.
+  const [google, setGoogle] = useState(false);
   const fieldId = useId();
+
+  useEffect(() => {
+    let alive = true;
+    void loadProviders().then((p) => alive && setGoogle(p.google));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -39,6 +49,17 @@ export function SignInDialog({ overlay }: { overlay: Extract<Overlay, { kind: 's
     setBusy(true);
     setError(null);
     requestLoginLink(email.trim(), overlay.resume).catch((err: unknown) => {
+      setError(errorMessage(err));
+      setBusy(false);
+    });
+  };
+
+  // Le navigateur part chez Google ; il n'en revient ici que si le départ échoue.
+  const continueWithGoogle = () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    signInWithGoogle(overlay.resume).catch((err: unknown) => {
       setError(errorMessage(err));
       setBusy(false);
     });
@@ -78,15 +99,19 @@ export function SignInDialog({ overlay }: { overlay: Extract<Overlay, { kind: 's
           Recevoir le lien de connexion
         </button>
       </form>
-      <div className="or" aria-hidden="true">
-        <span />
-        ou
-        <span />
-      </div>
-      <a className="btn btn-secondary btn-lg btn-block" href={googleSignInUrl(overlay.resume)}>
-        <GoogleLogo />
-        Continuer avec Google
-      </a>
+      {google && (
+        <>
+          <div className="or" aria-hidden="true">
+            <span />
+            ou
+            <span />
+          </div>
+          <button type="button" className="btn btn-secondary btn-lg btn-block" disabled={busy} onClick={continueWithGoogle}>
+            <GoogleLogo />
+            Continuer avec Google
+          </button>
+        </>
+      )}
       <p className="hint dialog-legal">
         Pas de mot de passe : un lien sécurisé arrive par email. En continuant, vous acceptez les{' '}
         <a className="text-link" href="/api/site/conditions" target="_blank" rel="noreferrer">
@@ -126,31 +151,42 @@ const RESEND_SECONDS = 60;
 const CODE_LENGTH = 6;
 
 /**
- * Écran `lien` : le lien est parti, on attend que la personne l'ouvre, ou qu'elle saisisse
- * ici le code à 6 chiffres du même email. Le code connecte l'appli elle-même : c'est le
- * chemin de l'appli installée sur iPhone, où le lien s'ouvre dans Safari.
+ * Écran `lien`, l'étape du code : l'email est parti, on attend que la personne ouvre son lien, ou qu'elle
+ * saisisse ici le code à 6 chiffres du même email. Le code connecte l'appli elle-même : c'est le chemin de
+ * l'appli installée sur iPhone, où le lien s'ouvre dans Safari.
+ *
+ * Le lien de l'email ouvre ce même écran, adresse et code remplis (`overlay.code`). Rien ne part alors tout
+ * seul : une messagerie qui ouvre le lien pour le vérifier ne consomme pas le code. L'action pleine devient
+ * « Me connecter », le mot du bouton de l'email, et c'est elle qui envoie le code.
  */
 export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sent' }> }) {
-  const [left, setLeft] = useState(RESEND_SECONDS);
+  // Arrivé par le lien : l'email est déjà ancien, on peut en redemander un tout de suite.
+  const [linked, setLinked] = useState(overlay.code !== undefined);
+  const [left, setLeft] = useState(linked ? 0 : RESEND_SECONDS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(overlay.code ?? '');
   const [checking, setChecking] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const codeId = useId();
 
-  // Le code part tout seul dès que ses six chiffres sont là (saisis, collés, ou proposés par le clavier).
-  const typeCode = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, CODE_LENGTH);
-    setCode(digits);
+  const submitCode = (digits: string) => {
     if (digits.length < CODE_LENGTH || checking) return;
     setChecking(true);
     setCodeError(null);
-    signInWithCode(overlay.email, digits).catch((err: unknown) => {
+    signInWithCode(overlay.email, digits, overlay.resume).catch((err: unknown) => {
       setCodeError(errorMessage(err));
       setCode('');
+      setLinked(false);
       setChecking(false);
     });
+  };
+
+  // Saisi ici, le code part tout seul dès que ses six chiffres sont là (tapés, collés, ou proposés par le clavier).
+  const typeCode = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, CODE_LENGTH);
+    setCode(digits);
+    submitCode(digits);
   };
 
   // Compte à rebours avant de pouvoir renvoyer le lien.
@@ -160,13 +196,14 @@ export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sen
     return () => window.clearTimeout(timer);
   }, [left]);
 
-  // Le lien ouvert dans ce navigateur connecte aussi cet onglet : on s'en aperçoit et on referme.
+  // La connexion faite dans un autre onglet de ce navigateur (par le lien de l'email) connecte aussi celui-ci :
+  // on s'en aperçoit et on referme.
   useEffect(() => {
     let stopped = false;
     const check = () => {
       if (document.visibilityState !== 'visible') return;
-      void refreshAccount().then((signed) => {
-        if (signed && !stopped) closeOverlay();
+      void refreshAccount().then(() => {
+        if (!stopped && signedInAs(overlay.email)) closeOverlay();
       });
     };
     const timer = window.setInterval(check, 4000);
@@ -176,13 +213,18 @@ export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sen
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', check);
     };
-  }, []);
+  }, [overlay.email]);
 
   const resend = () => {
     setBusy(true);
     setError(null);
     requestLoginLink(overlay.email, overlay.resume)
-      .then(() => setLeft(RESEND_SECONDS))
+      .then(() => {
+        // Un nouveau code est parti : celui que le lien avait rempli ne vaut plus rien.
+        if (linked) setCode('');
+        setLinked(false);
+        setLeft(RESEND_SECONDS);
+      })
       .catch((err: unknown) => setError(errorMessage(err)))
       .finally(() => setBusy(false));
   };
@@ -200,14 +242,20 @@ export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sen
         Un lien de connexion vient de partir vers <b>{overlay.email}</b>. Il est valable 15 minutes.
       </p>
       {error && <Notice>{error}</Notice>}
-      <a
-        className="btn btn-primary btn-lg btn-block dialog-action"
-        href={inbox}
-        {...(inbox.startsWith('mailto:') ? {} : { target: '_blank', rel: 'noreferrer' })}
-        data-autofocus
-      >
-        Ouvrir ma messagerie
-      </a>
+      {linked ? (
+        <button type="button" className="btn btn-primary btn-lg btn-block dialog-action" disabled={checking || code.length < CODE_LENGTH} onClick={() => submitCode(code)} data-autofocus>
+          Me connecter
+        </button>
+      ) : (
+        <a
+          className="btn btn-primary btn-lg btn-block dialog-action"
+          href={inbox}
+          {...(inbox.startsWith('mailto:') ? {} : { target: '_blank', rel: 'noreferrer' })}
+          data-autofocus
+        >
+          Ouvrir ma messagerie
+        </a>
+      )}
       <div className="field code-field">
         <label htmlFor={codeId}>Ou saisissez le code reçu</label>
         <input

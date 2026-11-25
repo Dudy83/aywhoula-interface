@@ -75,8 +75,8 @@ const pwa = VitePWA({
     // Réception des notifications d'alerte : public/push-sw.js, chargé par le service worker généré.
     importScripts: ['push-sw.js'],
     navigateFallback: '/index.html',
-    // Les relais des bouées et l'API ne sont pas des pages de l'app : le lien de
-    // connexion reçu par email (/api/auth/email/verify) doit arriver au serveur.
+    // Les relais des bouées et l'API ne sont pas des pages de l'app : le retour de Google
+    // (/api/auth/callback/google) et le lien de pause d'une alerte doivent arriver au serveur.
     navigateFallbackDenylist: [/^\/proxy\//, /^\/api\//],
     // Une seule route : les fichiers de spots, plages et webcams. Ne jamais en
     // ajouter pour les grilles .om (requêtes partielles), les relais /proxy/…,

@@ -1,4 +1,5 @@
 /** Spots, plages et webcams (fichiers tirés d'OpenStreetMap) et recherche de lieux. */
+import { isWebUrl } from '../lib/url';
 
 export interface Place {
   id: string;
@@ -82,26 +83,25 @@ export const loadBeaches = cached<Place[]>(() =>
   ),
 );
 
+/** Les webcams. Leur adresse devient un lien : une adresse qui n'est pas en `http:` ou `https:` est écartée. */
 export const loadWebcams = cached<Place[]>(() =>
   loadFile('webcams').then((f) =>
-    f.rows.map((r) => {
+    f.rows.flatMap((r) => {
       const url = String(r[4]);
-      let host = '';
-      try {
-        host = new URL(url).hostname.replace(/^www\./, '');
-      } catch {
-        host = '';
-      }
+      if (!isWebUrl(url)) return [];
+      const host = new URL(url).hostname.replace(/^www\./, '');
       const name = String(r[1]) || host || 'Webcam';
-      return {
-        id: `osm:${r[0]}`,
-        kind: 'webcam' as const,
-        name,
-        lon: Number(r[2]),
-        lat: Number(r[3]),
-        url,
-        norm: normalize(name),
-      };
+      return [
+        {
+          id: `osm:${r[0]}`,
+          kind: 'webcam' as const,
+          name,
+          lon: Number(r[2]),
+          lat: Number(r[3]),
+          url,
+          norm: normalize(name),
+        },
+      ];
     }),
   ),
 );

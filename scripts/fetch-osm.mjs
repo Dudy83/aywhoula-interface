@@ -215,6 +215,16 @@ async function loadSeaMask() {
   });
 }
 
+/** Une adresse qui s'ouvre dans le navigateur, en http: ou https:, rien d'autre (ni javascript:, ni data:). */
+function isWebUrl(value) {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 async function fetchWebcams(nearSea) {
   const rows = await sql(
     `SELECT osm_type, osm_id, tags->>'name' AS name, tags->>'contact:webcam' AS url, ${POINT}
@@ -224,7 +234,8 @@ async function fetchWebcams(nearSea) {
   const out = [];
   for (const r of rows) {
     const url = (r.url || '').split(';')[0].trim();
-    if (!/^https?:\/\//i.test(url) || !Number.isFinite(r.lon) || !Number.isFinite(r.lat)) continue;
+    // L'adresse devient un lien dans l'appli : seulement en http: ou https:.
+    if (!isWebUrl(url) || !Number.isFinite(r.lon) || !Number.isFinite(r.lat)) continue;
     if (!nearSea(r.lon, r.lat)) continue;
     out.push([`${r.osm_type}${r.osm_id}`, (r.name || '').trim(), round(r.lon), round(r.lat), url]);
   }

@@ -12,6 +12,7 @@ import {
 } from '../data/catalog';
 import type { ForecastChoice } from '../data/sea-state';
 import type { HeightUnit, TempUnit, Units, WindUnit } from '../lib/units';
+import { isWebUrl } from '../lib/url';
 
 export type ThemeChoice = 'auto' | 'light' | 'dark';
 export type DayView = 'table' | 'curves';
@@ -230,7 +231,7 @@ export function sanitizeFavorites(value: unknown): Selection[] {
     if (!finite(lon) || !finite(lat) || Math.abs(lat) > 90 || Math.abs(lon) > 360) continue;
     const place: Selection = { kind: kind as PlaceKind, id, name: typeof name === 'string' ? name.slice(0, 200) : '', lon, lat };
     // Le détail d'une webcam devient un lien : seulement une adresse http(s).
-    if (typeof detail === 'string' && detail && (kind !== 'webcam' || /^https?:\/\//i.test(detail))) place.detail = detail.slice(0, 500);
+    if (typeof detail === 'string' && detail && (kind !== 'webcam' || isWebUrl(detail))) place.detail = detail.slice(0, 500);
     seen.add(id);
     out.push(place);
   }
@@ -297,6 +298,28 @@ try {
   // Stockage indisponible : rien à reprendre.
 }
 
+/** Ce qui est enregistré dans le navigateur (`partialize`). Une nouvelle préférence passe aussi par `mergePersisted`. */
+const persistedOf = (s: State) => ({
+  layer: s.layer,
+  models: s.models,
+  units: s.units,
+  theme: s.theme,
+  animate: s.animate,
+  dayView: s.dayView,
+  dayStep: s.dayStep,
+  reopenLast: s.reopenLast,
+  lastSelection: s.lastSelection,
+  timelineView: s.timelineView,
+  timelineProfile: s.timelineProfile,
+  buoyView: s.buoyView,
+  show: s.show,
+  favorites: s.favorites,
+  view: s.view,
+  syncedAccount: s.syncedAccount,
+  unsent: s.unsent,
+});
+type PersistedState = ReturnType<typeof persistedOf>;
+
 export const useStore = create<State>()(
   persist(
     (set) => ({
@@ -309,8 +332,8 @@ export const useStore = create<State>()(
       dayStep: '3h',
       reopenLast: true,
       lastSelection: null,
-      // Au premier lancement, le tableau sur téléphone, les courbes sur ordinateur ; ensuite, le choix fait ici.
-      timelineView: window.matchMedia('(min-width: 900px)').matches ? 'curves' : 'table',
+      // Au premier lancement, le tableau, sur ordinateur comme sur téléphone ; ensuite, le choix fait ici.
+      timelineView: 'table',
       timelineProfile: 'waves',
       buoyView: 'bars',
       timeLimit: null,
@@ -396,26 +419,15 @@ export const useStore = create<State>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 1,
-      partialize: (s) => ({
-        layer: s.layer,
-        models: s.models,
-        units: s.units,
-        theme: s.theme,
-        animate: s.animate,
-        dayView: s.dayView,
-        dayStep: s.dayStep,
-        reopenLast: s.reopenLast,
-        lastSelection: s.lastSelection,
-        timelineView: s.timelineView,
-        timelineProfile: s.timelineProfile,
-        buoyView: s.buoyView,
-        show: s.show,
-        favorites: s.favorites,
-        view: s.view,
-        syncedAccount: s.syncedAccount,
-        unsent: s.unsent,
-      }),
+      // Version 2 (25 novembre 2026) : le tableau devient la vue par défaut de la barre du temps, une seule fois,
+      // pour les installations existantes aussi ; ensuite, le choix de chacun est gardé. Ce que la migration rend
+      // passe ensuite par `mergePersisted`, champ par champ, comme tout ce qui est relu.
+      version: 2,
+      migrate: (persisted, version) => {
+        const state = persisted && typeof persisted === 'object' ? (persisted as Record<string, unknown>) : {};
+        return (version < 2 ? { ...state, timelineView: 'table' } : state) as PersistedState;
+      },
+      partialize: persistedOf,
       merge: (persisted, current) => mergePersisted(persisted, current),
     },
   ),

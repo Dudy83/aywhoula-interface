@@ -9,24 +9,8 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <title>Aywhoula · vagues et vent</title>
-    <script>
-      // Le thème est posé avant le premier affichage, pour que l'écran de démarrage
-      // prenne tout de suite la bonne couleur. Même règle que useResolvedTheme :
-      // le choix enregistré, sinon le thème du système. App.tsx prend ensuite la main.
-      (function () {
-        var theme;
-        try {
-          theme = JSON.parse(localStorage.getItem('aywhoula')).state.theme;
-        } catch (e) {
-          // Rien d'enregistré, ou stockage indisponible : thème du système.
-        }
-        if (theme !== 'light' && theme !== 'dark') {
-          theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
-        document.documentElement.dataset.theme = theme;
-        if (theme === 'light') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#eef0f2');
-      })();
-    </script>
+    <!-- Le thème, posé avant le premier affichage (public/theme.js) : aucun script en ligne dans la page. -->
+    <script src="/theme.js"></script>
     <style>
       /* Tout ce qui s'affiche avant le chargement de l'app est écrit ici et non dans
          src/styles.css : l'écran de démarrage, et l'animation de la marque, qui sert
