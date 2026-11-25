@@ -577,6 +577,56 @@ const NOTICES = {
 /** Les codes d'erreur de Better-Auth qui veulent dire « Google n'a pas confirmé cette adresse ». */
 const UNCONFIRMED = ['email_not_verified', 'account_not_linked'];
 
+/** Ce que porte le lien de l'email de connexion : l'adresse, et son code s'il est lisible. */
+interface LoginLink {
+  email: string;
+  code: string | null;
+}
+
+/**
+ * Lit `connexion` et `code` là où le lien de l'email les porte : dans le fragment de l'adresse, ou dans sa
+ * chaîne de requête pour un lien envoyé sous l'ancienne forme. Seule une adresse email fait un lien :
+ * tout autre `connexion=` est un retour de Google qui a échoué. L'adresse est montrée telle quelle avant
+ * tout geste : rien qui porte une espace ou plus d'un `@` n'est pris pour une adresse, un lien fabriqué n'y
+ * glisse pas une phrase.
+ */
+function loginLinkOf(params: URLSearchParams): LoginLink | null {
+  const email = params.get('connexion');
+  const code = params.get('code');
+  return email && email.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(email) ? { email, code: code && /^[0-9]{6}$/.test(code) ? code : null } : null;
+}
+
+/**
+ * Le lien de l'email, pris dans le fragment de l'adresse (`#connexion=<adresse>&code=<code>`). Le navigateur
+ * n'envoie un fragment à aucun serveur, ni dans une requête, ni dans un en-tête `Referer`. Lu, il est aussitôt
+ * retiré de la barre d'adresse et de l'historique. `null` : le fragment ne porte pas de lien de connexion.
+ */
+function takeHashLink(): LoginLink | null {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams(url.hash.slice(1));
+  if (!params.has('connexion')) return null;
+  window.history.replaceState(null, '', url.pathname + url.search);
+  return loginLinkOf(params);
+}
+
+/**
+ * Ouvre ce que demande le lien de l'email : l'étape du code, adresse et code remplis, où la personne lit avec
+ * quelle adresse elle va se connecter avant de toucher « Me connecter ». Rien ne part d'ici.
+ */
+function openLoginLink(link: LoginLink): void {
+  if (signedInAs(link.email)) {
+    // Ce compte est déjà connecté ici (le code a servi dans un autre onglet) : il ne reste qu'à reprendre.
+    const pending = pendingResume(link.email);
+    forgetSignIn();
+    runResume(pending ?? { action: 'profile' });
+    return;
+  }
+  const pending = pendingResume(link.email) ?? { action: 'profile' };
+  // Sans code lisible, on repart de l'adresse.
+  if (link.code) useAccount.setState({ overlay: { kind: 'sent', resume: pending, email: link.email, code: link.code } });
+  else openSignIn(pending, { email: link.email });
+}
+
 /**
  * À l'ouverture de l'appli : lit les paramètres d'adresse qui concernent le compte, les
  * retire de l'adresse, demande l'état du compte, puis ouvre ce qui était demandé.
@@ -587,12 +637,16 @@ const UNCONFIRMED = ['email_not_verified', 'account_not_linked'];
  * - `?premium=bienvenue` et `?premium=offre` : les retours de Stripe, paiement fait ou abandonné ;
  * - `?reprise=…` : retour de Google, connecté, avec l'action à reprendre ;
  * - `?connexion=google` (et `&error=…`, de Better-Auth) : un parcours Google qui n'a pas abouti ;
- * - `?connexion=<adresse>&code=<code>` : le lien de l'email de connexion. Il ouvre l'étape du code, adresse et
- *   code remplis : rien ne part tant que la personne n'a pas touché « Me connecter » ;
+ * - `#connexion=<adresse>&code=<code>` : le lien de l'email de connexion, dans le fragment de l'adresse, que le
+ *   navigateur n'envoie à aucun serveur. Il ouvre l'étape du code, adresse et code remplis : rien ne part tant
+ *   que la personne n'a pas touché « Me connecter ». Un lien envoyé sous l'ancienne forme,
+ *   `?connexion=<adresse>&code=<code>`, se lit de la même façon ;
  * - `?panneau=alertes` et `?panneau=alerte` : « Mes alertes » et « Nouvelle alerte » ;
  * - `?lieu=…&heure=…` : le lien profond d'une notification ou d'un email d'alerte.
  */
 export async function startAccount(): Promise<void> {
+  // Le lien de l'email d'abord : son fragment quitte la barre d'adresse avant toute autre lecture.
+  const hashLink = takeHashLink();
   const url = new URL(window.location.href);
   const q = url.searchParams;
   const wantsAccount = q.has('compte');
@@ -604,10 +658,10 @@ export async function startAccount(): Promise<void> {
   const stripeReturn = q.get('premium');
   const resume = decodeResume(q.get('reprise'));
   const connexion = q.get('connexion');
-  const code = q.get('code');
-  // Le lien de l'email porte une adresse ; tout autre `?connexion=` est un retour de Google qui a échoué.
-  const link = connexion?.includes('@') && connexion.length <= 254 ? { email: connexion, code: code && /^[0-9]{6}$/.test(code) ? code : null } : null;
-  const notice = connexion && !link ? NOTICES[UNCONFIRMED.includes(q.get('error') ?? '') ? 'google-email' : 'google'] : null;
+  // Un lien envoyé sous l'ancienne forme porte l'adresse et le code dans la chaîne de requête.
+  const queryLink = loginLinkOf(q);
+  const link = hashLink ?? queryLink;
+  const notice = connexion && !queryLink ? NOTICES[UNCONFIRMED.includes(q.get('error') ?? '') ? 'google-email' : 'google'] : null;
   // Avec `connexion` partent son code et ce que Better-Auth ajoute à un retour en erreur.
   const handled = ['compte', 'panneau', 'offre', 'premium', 'session_id', 'reprise', 'connexion', 'lieu', 'heure', ...(connexion === null ? [] : ['code', 'error', 'error_description'])].filter((key) => q.has(key));
   if (handled.length > 0) {
@@ -619,17 +673,8 @@ export async function startAccount(): Promise<void> {
   pendingSignIn();
 
   const signed = await refreshAccount();
-  if (link && signedInAs(link.email)) {
-    // Ce compte est déjà connecté ici (le code a servi dans un autre onglet) : il ne reste qu'à reprendre.
-    const pending = pendingResume(link.email);
-    forgetSignIn();
-    runResume(pending ?? { action: 'profile' });
-  } else if (link) {
-    const pending = pendingResume(link.email) ?? { action: 'profile' };
-    // Sans code lisible, on repart de l'adresse.
-    if (link.code) useAccount.setState({ overlay: { kind: 'sent', resume: pending, email: link.email, code: link.code } });
-    else openSignIn(pending, { email: link.email });
-  } else if (notice && !signed) openSignIn({ action: 'profile' }, { notice });
+  if (link) openLoginLink(link);
+  else if (notice && !signed) openSignIn({ action: 'profile' }, { notice });
   else if (stripeReturn === 'bienvenue' && signed) void awaitPremium();
   else if (resume && signed) runResume(resume);
   else if (offer || stripeReturn === 'offre') {
@@ -654,6 +699,13 @@ export async function startAccount(): Promise<void> {
   // peut-être toujours là, et ce qui a été fait hors ligne peut partir.
   window.addEventListener('online', () => {
     if (useAccount.getState().status === 'guest' && useStore.getState().syncedAccount) void refreshAccount();
+  });
+
+  // Le lien de l'email ouvert là où l'appli l'est déjà (l'appli installée qui reprend le lien, ou le lien collé
+  // dans la barre d'adresse) : seul le fragment change, la page ne se recharge pas.
+  window.addEventListener('hashchange', () => {
+    const arrived = takeHashLink();
+    if (arrived) openLoginLink(arrived);
   });
 
   // Au retour sur l'onglet, le compte a pu changer ailleurs (autre onglet, autre appareil, portail Stripe) :

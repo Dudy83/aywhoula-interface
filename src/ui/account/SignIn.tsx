@@ -1,5 +1,5 @@
 import { CircleAlert, Mail } from 'lucide-react';
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { errorMessage } from '../../data/api';
 import { closeOverlay, loadProviders, openSignIn, refreshAccount, requestLoginLink, signedInAs, signInWithCode, signInWithGoogle, type Overlay } from '../../state/account';
 import { Dialog } from './Dialog';
@@ -156,8 +156,10 @@ const CODE_LENGTH = 6;
  * l'appli installée sur iPhone, où le lien s'ouvre dans Safari.
  *
  * Le lien de l'email ouvre ce même écran, adresse et code remplis (`overlay.code`). Rien ne part alors tout
- * seul : une messagerie qui ouvre le lien pour le vérifier ne consomme pas le code. L'action pleine devient
- * « Me connecter », le mot du bouton de l'email, et c'est elle qui envoie le code.
+ * seul : une messagerie qui ouvre le lien pour le vérifier ne consomme pas le code. L'écran dit avec quelle
+ * adresse on va se connecter (un lien fabriqué par quelqu'un d'autre, avec son adresse et son code, ne connecte
+ * personne à son insu), l'action pleine devient « Me connecter », le mot du bouton de l'email, et c'est elle
+ * qui envoie le code.
  */
 export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sent' }> }) {
   // Arrivé par le lien : l'email est déjà ancien, on peut en redemander un tout de suite.
@@ -169,6 +171,27 @@ export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sen
   const [checking, setChecking] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const codeId = useId();
+
+  // Le lien arrive alors que cet écran est déjà ouvert (l'appli installée reprend le lien sans se recharger) :
+  // il se remplit comme à l'ouverture, et attend le même geste.
+  const [shown, setShown] = useState(overlay);
+  if (overlay !== shown) {
+    setShown(overlay);
+    if (overlay.code !== undefined) {
+      setLinked(true);
+      setCode(overlay.code);
+      setLeft(0);
+      setError(null);
+      setCodeError(null);
+    }
+  }
+  // À l'ouverture, la fenêtre pose le focus sur son action ; un lien arrivé ensuite l'y remet.
+  const action = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current && overlay.code !== undefined) action.current?.focus();
+    opened.current = true;
+  }, [overlay]);
 
   const submitCode = (digits: string) => {
     if (digits.length < CODE_LENGTH || checking) return;
@@ -239,11 +262,19 @@ export function SentDialog({ overlay }: { overlay: Extract<Overlay, { kind: 'sen
       <p className="hint">Étape 2 sur 2</p>
       <h2 className="title-lg">Vérifiez votre boîte mail</h2>
       <p className="lead lead-loose">
-        Un lien de connexion vient de partir vers <b>{overlay.email}</b>. Il est valable 15 minutes.
+        {linked ? (
+          <>
+            Vous allez vous connecter avec <b>{overlay.email}</b>.
+          </>
+        ) : (
+          <>
+            Un lien de connexion vient de partir vers <b>{overlay.email}</b>. Il est valable 15 minutes.
+          </>
+        )}
       </p>
       {error && <Notice>{error}</Notice>}
       {linked ? (
-        <button type="button" className="btn btn-primary btn-lg btn-block dialog-action" disabled={checking || code.length < CODE_LENGTH} onClick={() => submitCode(code)} data-autofocus>
+        <button type="button" className="btn btn-primary btn-lg btn-block dialog-action" disabled={checking || code.length < CODE_LENGTH} onClick={() => submitCode(code)} ref={action} data-autofocus>
           Me connecter
         </button>
       ) : (
