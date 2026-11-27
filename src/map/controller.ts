@@ -1,6 +1,9 @@
 /**
  * Fait le lien entre l'état de l'app (couche, modèle, heure) et la couche WebGL :
  * résout les lectures à faire, charge les échéances utiles, anime la lecture.
+ *
+ * Il est créé dès que la carte est montée, avant son fond : les grilles de la vue de départ sont lues
+ * pendant que le style, les tuiles et les polices se chargent, au lieu de n'être demandées qu'après.
  */
 import type { Map as MlMap } from 'maplibre-gl';
 import { DOMAINS, LAYER_BY_ID, resolvePlan, type GridSpec, type LayerPlan } from '../data/catalog';
@@ -9,7 +12,7 @@ import { chooseWindow, frameCache, frameKey, windowCovers, type FrameRequest, ty
 import { getRunMeta, type RunMeta } from '../data/om';
 import { getPalette } from '../data/palettes';
 import { bracket, HOUR, nearestIndex } from '../lib/time';
-import { effectiveModel, useStore } from '../state/store';
+import { effectiveModel, useStore, type FieldStatus } from '../state/store';
 import type { FieldLayer } from './FieldLayer';
 
 /** Vitesse de lecture : heures de prévision par seconde réelle. */
@@ -51,6 +54,16 @@ export class FieldController {
   private prefetchFailed = new Map<string, number>();
   /** Échéance que la lecture attend pour avancer. */
   private awaited: string | null = null;
+  /**
+   * L'état du champ, tel que le contrôleur le connaît. Le contrôleur lit ses grilles dès que la carte est
+   * montée, mais tant que le fond de carte n'est pas dessiné (`markShown`), rien n'en sort : ni l'état vers
+   * le store (« prêt » veut toujours dire que le champ se voit, et l'écran de démarrage ne s'efface pas
+   * plus tôt qu'avant), ni les échéances vers la couche (sans océan pour lui servir de masque, elle
+   * n'aurait rien à montrer, et son animation prendrait au fond de carte le temps de se dessiner).
+   */
+  private status: FieldStatus = 'loading';
+  private statusError: string | null = null;
+  private shown = false;
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -76,6 +89,24 @@ export class FieldController {
     this.map.off('moveend', this.update);
     cancelAnimationFrame(this.raf);
     clearInterval(this.refreshTimer);
+  }
+
+  /**
+   * Le fond de carte est dessiné (événement `load` de MapLibre) : les échéances déjà lues passent à la
+   * couche, et l'état du champ se publie désormais.
+   */
+  markShown(): void {
+    if (this.shown) return;
+    this.shown = true;
+    this.update();
+    const store = useStore.getState();
+    if (store.status !== this.status || store.error !== this.statusError) store.setStatus(this.status, this.statusError);
+  }
+
+  private setStatus(status: FieldStatus, error: string | null = null): void {
+    this.status = status;
+    this.statusError = error;
+    if (this.shown) useStore.getState().setStatus(status, error);
   }
 
   setDark(dark: boolean): void {
@@ -106,7 +137,7 @@ export class FieldController {
         opacityLand: layerDef.opacity.land,
         particles: layerDef.particles,
       });
-      store.setStatus('loading');
+      this.setStatus('loading');
     }
 
     try {
@@ -132,7 +163,7 @@ export class FieldController {
       if (gen !== this.generation) return;
       // Un rafraîchissement manqué ne remet pas en cause ce qui est affiché : on réessaiera.
       if (refreshOnly && this.metas) return;
-      useStore.getState().setStatus('error', err instanceof Error ? err.message : String(err));
+      this.setStatus('error', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -178,7 +209,7 @@ export class FieldController {
     };
     const failed = (err: unknown) => {
       if (gen !== this.generation || (err as Error)?.name === 'AbortError') return;
-      useStore.getState().setStatus('error', 'Données indisponibles pour cette échéance.');
+      this.setStatus('error', 'Données indisponibles pour cette échéance.');
     };
 
     const a = frameCache.peek(keyA);
@@ -194,10 +225,10 @@ export class FieldController {
     }
 
     if (a) {
-      this.layer.setFrames(a, b, b ? mix : 0);
-      if (store.status !== 'ready') store.setStatus('ready');
-    } else if (store.status === 'ready') {
-      store.setStatus('loading');
+      if (this.shown) this.layer.setFrames(a, b, b ? mix : 0);
+      if (this.status !== 'ready') this.setStatus('ready');
+    } else if (this.status === 'ready') {
+      this.setStatus('loading');
     }
     this.publishReadout();
   };
@@ -242,9 +273,8 @@ export class FieldController {
     frameCache.load(req).then(done, (err: unknown) => {
       done();
       if (gen !== this.generation || (err as Error)?.name === 'AbortError') return;
-      const store = useStore.getState();
-      store.setPlaying(false);
-      store.setStatus('error', 'Données indisponibles pour cette échéance.');
+      useStore.getState().setPlaying(false);
+      this.setStatus('error', 'Données indisponibles pour cette échéance.');
     });
   }
 

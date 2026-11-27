@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Pause, Play } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LAYER_BY_ID, MODEL_BY_ID, modelsForLayer, type LayerId } from '../data/catalog';
 import { getPalette, paletteGradient } from '../data/palettes';
 import { formatQuantity, legendTicks, quantityUnit } from '../lib/quantity';
@@ -8,7 +8,8 @@ import { formatHour, formatRun } from '../lib/time';
 import type { HeightUnit, TempUnit, WindUnit } from '../lib/units';
 import { effectiveModel, useStore, type TimelineProfile } from '../state/store';
 import { aboveSheetRow, Popover, radioFocusKeyDown, useWide } from './common';
-import { ReducedCard } from './place/PlaceCard';
+import { DayStrip } from './DayStrip';
+import { ReducedPlace } from './place/PlaceCard';
 import { StepSwitch } from './StepSwitch';
 import { SHEET_DAYS, Timeline, TimelineViewSwitch } from './Timeline';
 import { PROFILE_BY_ID } from './timeline/profiles';
@@ -267,6 +268,17 @@ function Credits() {
   );
 }
 
+/** Sur téléphone, la lecture, l'heure et le modèle : la première ligne de la barre, dans la feuille d'un lieu comme en bas de l'écran. */
+function BarHead() {
+  return (
+    <div className="sheet-bar-row">
+      <PlayButton />
+      <Clock />
+      <ModelPicker />
+    </div>
+  );
+}
+
 /**
  * La barre du bas dans le dialog d'un lieu, sur téléphone : la lecture et l'horloge, le modèle ; la vue
  * (courbes ou tableau), le type d'affichage et le pas ; puis les courbes ou le tableau, deux jours et un
@@ -275,11 +287,7 @@ function Credits() {
 export function SheetBar() {
   return (
     <section className="sheet-bar" aria-label="Prévision du lieu, heure par heure">
-      <div className="sheet-bar-row">
-        <PlayButton />
-        <Clock />
-        <ModelPicker />
-      </div>
+      <BarHead />
       <div className="sheet-bar-row sheet-bar-row-view">
         <TimelineViewSwitch />
         <ProfilePicker />
@@ -290,35 +298,67 @@ export function SheetBar() {
   );
 }
 
-/** Sur téléphone, le dialog réduit : sa petite carte, au-dessus de la légende de la carte. */
-function SheetCard() {
-  const selection = useStore((s) => s.selection);
-  const reduced = useStore((s) => s.sheet === 'reduced');
-  const wide = useWide();
-  if (wide || !selection || !reduced) return null;
-  return <ReducedCard selection={selection} wide={false} />;
+/** Le temps du repli de la ligne d'un lieu dans la barre du téléphone : celui des changements de hauteur (DESIGN.md). */
+const FOLD_MS = 240;
+
+/**
+ * Une valeur qui disparaît reste rendue le temps de son repli (`ms`), marquée `leaving` ; une valeur qui revient
+ * pendant ce temps le reprend.
+ */
+function useLeaving<T>(value: T | null, ms: number): { shown: T | null; leaving: boolean } {
+  const [last, setLast] = useState<T | null>(value);
+  useEffect(() => {
+    if (value !== null) {
+      setLast(value);
+      return;
+    }
+    const timer = window.setTimeout(() => setLast(null), ms);
+    return () => window.clearTimeout(timer);
+  }, [value, ms]);
+  return value !== null ? { shown: value, leaving: false } : { shown: last, leaving: last !== null };
+}
+
+/**
+ * La barre du bas du téléphone, une seule surface : la lecture, l'heure et le modèle, puis la frise des jours.
+ * La feuille d'un lieu réduite y ajoute en tête la ligne du lieu. Ni tableau ni courbes : ils ne vivent que dans
+ * la feuille d'un lieu (`SheetBar`), et la barre ne montre jamais la prévision d'un lieu fermé (`lastSelection`).
+ */
+function PhoneBar() {
+  const reduced = useStore((s) => (s.sheet === 'reduced' ? s.selection : null));
+  const { shown, leaving } = useLeaving(reduced, FOLD_MS);
+  return (
+    <section className="dock-bar" aria-label="Heure de la carte">
+      {shown && <ReducedPlace key={shown.id} selection={shown} leaving={leaving} />}
+      <BarHead />
+      <DayStrip />
+    </section>
+  );
 }
 
 export function Dock() {
+  const wide = useWide();
   return (
     <div className="dock-area">
       <Status />
-      <SheetCard />
       <div className="dock-top">
         <Legend />
         <Credits />
       </div>
-      <div className="dock">
-        <PlayButton />
-        <Clock />
-        <TimelineViewSwitch />
-        <div className="tl-step">
-          <StepSwitch />
-          <ProfilePicker />
+      {wide ? (
+        <div className="dock">
+          <PlayButton />
+          <Clock />
+          <TimelineViewSwitch />
+          <div className="tl-step">
+            <StepSwitch />
+            <ProfilePicker />
+          </div>
+          <ModelPicker />
+          <Timeline />
         </div>
-        <ModelPicker />
-        <Timeline />
-      </div>
+      ) : (
+        <PhoneBar />
+      )}
     </div>
   );
 }

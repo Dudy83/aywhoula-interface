@@ -298,6 +298,23 @@ try {
   // Stockage indisponible : rien à reprendre.
 }
 
+/**
+ * Les changements d'une version du stockage à l'autre, appliqués une seule fois à ce qui est relu (du navigateur,
+ * ou de l'ancienne origine par `#import=`) ; le résultat passe ensuite par `mergePersisted`, champ par champ.
+ * - Version 2 (25 novembre 2026) : le tableau devient la vue par défaut de la barre du temps, pour les
+ *   installations existantes aussi ; ensuite, le choix de chacun est gardé.
+ * - Version 3 (27 novembre 2026) : Vent devient la couche de l'ouverture. Une couche enregistrée « waves » était
+ *   la valeur par défaut, qu'on ne distingue pas d'un choix (l'appli n'est en ligne que depuis le 25 novembre) :
+ *   elle passe une fois à Vent. Les autres couches enregistrées ne changent pas.
+ */
+const STORAGE_VERSION = 3;
+function migrateStored(persisted: unknown, version: number): Record<string, unknown> {
+  let state = persisted && typeof persisted === 'object' ? (persisted as Record<string, unknown>) : {};
+  if (version < 2) state = { ...state, timelineView: 'table' };
+  if (version < 3 && state.layer === 'waves') state = { ...state, layer: 'wind' };
+  return state;
+}
+
 /** Ce qui est enregistré dans le navigateur (`partialize`). Une nouvelle préférence passe aussi par `mergePersisted`. */
 const persistedOf = (s: State) => ({
   layer: s.layer,
@@ -323,7 +340,7 @@ type PersistedState = ReturnType<typeof persistedOf>;
 export const useStore = create<State>()(
   persist(
     (set) => ({
-      layer: 'waves',
+      layer: 'wind',
       models: DEFAULT_MODELS,
       units: { wind: 'kn', height: 'm', temp: 'c' },
       theme: 'auto',
@@ -419,14 +436,8 @@ export const useStore = create<State>()(
     }),
     {
       name: STORAGE_KEY,
-      // Version 2 (25 novembre 2026) : le tableau devient la vue par défaut de la barre du temps, une seule fois,
-      // pour les installations existantes aussi ; ensuite, le choix de chacun est gardé. Ce que la migration rend
-      // passe ensuite par `mergePersisted`, champ par champ, comme tout ce qui est relu.
-      version: 2,
-      migrate: (persisted, version) => {
-        const state = persisted && typeof persisted === 'object' ? (persisted as Record<string, unknown>) : {};
-        return (version < 2 ? { ...state, timelineView: 'table' } : state) as PersistedState;
-      },
+      version: STORAGE_VERSION,
+      migrate: (persisted, version) => migrateStored(persisted, version) as PersistedState,
       partialize: persistedOf,
       merge: (persisted, current) => mergePersisted(persisted, current),
     },
@@ -495,9 +506,10 @@ function importFromHash(): void {
   if (!match) return;
   try {
     const bytes = Uint8Array.from(atob(match[1].replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { state?: unknown } | null;
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { state?: unknown; version?: unknown } | null;
     const state = useStore.getState();
-    const incoming = mergePersisted(parsed?.state, useStore.getInitialState());
+    const version = typeof parsed?.version === 'number' ? parsed.version : 0;
+    const incoming = mergePersisted(migrateStored(parsed?.state, version), useStore.getInitialState());
     const known = new Set(state.favorites.map((f) => f.id));
     const favorites = [...state.favorites, ...incoming.favorites.filter((f) => !known.has(f.id))];
     if (hadStoredState) {

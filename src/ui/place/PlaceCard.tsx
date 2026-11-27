@@ -1,10 +1,11 @@
 /**
  * Les petites cartes d'un lieu, et les boutons d'en-tête qu'elles partagent avec le dialog. Sur ordinateur,
  * celle d'un point de la carte (il n'a pas de dialog : sa rose dit déjà la houle, les vagues et le vent) et
- * celle d'un dialog réduit, en haut à droite, à gauche des boutons de carte ; sur téléphone, celle du dialog
- * réduit, au-dessus de la légende de la carte (`Dock`).
+ * celle d'un dialog réduit, en haut à droite, à gauche des boutons de carte ; sur téléphone, le dialog réduit
+ * est la ligne du lieu en tête de la barre du bas (`Dock`), sous sa poignée.
  */
 import { BellPlus, ChevronUp, PanelRightOpen, Star, X } from 'lucide-react';
+import { useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { loadBuoy } from '../../data/buoys';
 import { hostOf, isLive, placeSelection, useAsync, useFilmedPlace } from '../../data/nearby';
 import { formatAgo } from '../../lib/time';
@@ -100,18 +101,22 @@ function BuoySummary({ selection }: { selection: Selection }) {
   );
 }
 
-/**
- * Le dialog réduit : le pictogramme, le nom, une ligne de résumé, de quoi rouvrir et la croix. Le lieu
- * reste sélectionné sur la carte ; toucher la carte (ou le lieu sur la carte) rouvre le dialog.
- */
-export function ReducedCard({ selection, wide }: { selection: Selection; wide: boolean }) {
-  const reopen = () => useStore.getState().setSheet('open');
-  const url = selection.kind === 'webcam' ? selection.detail : undefined;
+const reopen = () => useStore.getState().setSheet('open');
+
+/** Le nom d'un dialog réduit (« Point en mer » pour un point), et pour un point ses coordonnées et la distance à la côte. */
+function useReducedHeading(selection: Selection): { name: string; parts: string[] } {
   const point = usePointHeading(selection, selection.kind === 'point');
-  const name = selection.kind === 'point' ? point.title : selection.name || 'Lieu sans nom';
+  return { name: selection.kind === 'point' ? point.title : selection.name || 'Lieu sans nom', parts: point.parts };
+}
+
+/**
+ * Ce que montre un dialog réduit : le pictogramme, le nom, une ligne de résumé, de quoi rouvrir et la croix.
+ * Le toucher sur la ligne rouvre le dialog ; au clavier, le bouton « Rouvrir ».
+ */
+function ReducedContent({ selection, name, parts, wide }: { selection: Selection; name: string; parts: string[]; wide: boolean }) {
+  const url = selection.kind === 'webcam' ? selection.detail : undefined;
   return (
-    <aside className="place-card" data-reduced aria-label={`${name}, dialog réduit`}>
-      {/* Le toucher sur la carte rouvre le dialog ; au clavier, le bouton « Rouvrir ». */}
+    <>
       <div className="place-card-main" onClick={reopen}>
         <span className="place-card-icon" aria-hidden="true">
           <PlaceIcon kind={selection.kind} size={18} />
@@ -132,7 +137,7 @@ export function ReducedCard({ selection, wide }: { selection: Selection; wide: b
             )
           ) : (
             <span>
-              <Pieces parts={point.parts} />
+              <Pieces parts={parts} />
             </span>
           )}
         </div>
@@ -143,6 +148,74 @@ export function ReducedCard({ selection, wide }: { selection: Selection; wide: b
         </button>
         <CloseButton />
       </div>
+    </>
+  );
+}
+
+/**
+ * Sur ordinateur, le dialog réduit : sa petite carte, en haut à droite. Le lieu reste sélectionné sur la carte ;
+ * toucher la carte (ou le lieu sur la carte) rouvre le dialog.
+ */
+export function ReducedCard({ selection }: { selection: Selection }) {
+  const { name, parts } = useReducedHeading(selection);
+  return (
+    <aside className="place-card" data-reduced aria-label={`${name}, dialog réduit`}>
+      <ReducedContent selection={selection} name={name} parts={parts} wide />
     </aside>
+  );
+}
+
+/** Le glissé qui rouvre la feuille : vers le haut, au-delà du seuil de la poignée du dialog (`PlaceDialog`). */
+const REOPEN_DRAG = 48;
+
+/**
+ * Sur téléphone, le dialog réduit : le haut de la barre du bas, avec la poignée, la ligne du lieu et un filet
+ * au-dessus de la lecture et de la frise. Toucher la ligne (ou la flèche) rouvre le dialog, un glissé vers le
+ * haut sur la poignée ou la ligne aussi ; la croix le ferme. `leaving` : le lieu vient d'être fermé ou rouvert,
+ * la ligne se replie (`Dock`).
+ */
+export function ReducedPlace({ selection, leaving }: { selection: Selection; leaving: boolean }) {
+  const { name, parts } = useReducedHeading(selection);
+  const drag = useRef<{ id: number; y: number; moved: boolean } | null>(null);
+  /** Un glissé vient de finir : le clic qui le suit éventuellement n'est pas un toucher. */
+  const swiped = useRef(false);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button, a')) return;
+    drag.current = { id: e.pointerId, y: e.clientY, moved: false };
+  };
+  // La capture ne commence qu'avec le glissé : un toucher reste un clic sur la ligne ou la poignée.
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId || d.moved || Math.abs(e.clientY - d.y) < 6) return;
+    d.moved = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d || d.id !== e.pointerId || !d.moved) return;
+    swiped.current = true;
+    window.setTimeout(() => (swiped.current = false), 400);
+    if (e.type === 'pointerup' && e.clientY - d.y < -REOPEN_DRAG) reopen();
+  };
+  const onClickCapture = (e: ReactMouseEvent) => {
+    if (!swiped.current) return;
+    swiped.current = false;
+    e.stopPropagation();
+  };
+
+  return (
+    <div className="dock-place" data-leaving={leaving || undefined} inert={leaving}>
+      <div className="dock-place-inner">
+        <div className="dock-place-handle" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onClickCapture={onClickCapture}>
+          {/* Au clavier, le bouton « Rouvrir » ; la poignée est pour le doigt. */}
+          <span className="dock-place-grip" aria-hidden="true" onClick={reopen} />
+          <div className="dock-place-row" role="group" aria-label={`${name}, dialog réduit`}>
+            <ReducedContent selection={selection} name={name} parts={parts} wide={false} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

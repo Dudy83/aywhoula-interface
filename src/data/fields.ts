@@ -1,11 +1,11 @@
 /**
- * Chargement des champs (grilles) pour la carte : choix de la fenêtre à lire,
- * dialogue avec les workers, cache des échéances déjà décodées, et
- * échantillonnage ponctuel (valeur sous le curseur, particules).
+ * Chargement des champs (grilles) pour la carte : choix de la fenêtre à lire et de
+ * son niveau de réduction, dialogue avec les workers, cache des échéances déjà
+ * décodées, et échantillonnage ponctuel (valeur sous le curseur, particules).
  */
 import { DOMAINS, type GridSpec, type LayerPlan, type ReadSpec } from './catalog';
 import type { FieldJob, ReadWindow, WorkerIn, WorkerOut } from './field-worker';
-import { omFileUrl, type RunMeta } from './om';
+import { fieldUrl, type RunMeta } from './om';
 
 export const NODATA = -9999;
 const VALID = -9000;
@@ -46,57 +46,72 @@ export interface ViewBounds {
   north: number;
 }
 
-/** Au-delà de ce nombre de cellules, on lit une fenêtre ou on sous-échantillonne. */
-const MAX_CELLS = 1_500_000;
+/**
+ * Au-delà de ce nombre de points, on lit une fenêtre ou on passe au niveau de réduction suivant :
+ * l'ordre de grandeur des pixels de la carte à l'écran.
+ */
+const MAX_CELLS = 600_000;
 const MAX_DIM = 2048;
-const ALIGN = 64;
+/** Points de côté d'un bloc servi sous `/grilles/`. Au niveau L, il couvre 256 · 2^L cellules de la grille. */
+const BLOCK = 256;
+/** Niveaux de réduction : au niveau L, un point sur 2^L dans chaque direction. */
+const MAX_LEVEL = 4;
 
 const isGlobal = (g: GridSpec) => g.nx * g.dx >= 360 - g.dx * 1.5;
 
 /**
- * Fenêtre de lecture pour une vue donnée. Les petites grilles sont lues en
- * entier ; les grandes sont réduites à la vue (avec marge), puis
- * sous-échantillonnées si la fenêtre reste trop lourde.
+ * La vue augmentée de sa marge, en cellules de la grille, alignée sur les blocs de `span` cellules et
+ * coupée au bord de la grille.
  */
-export function chooseWindow(g: GridSpec, view: ViewBounds): ReadWindow {
+function viewWindow(g: GridSpec, view: ViewBounds, span: number): { x0: number; x1: number; y0: number; y1: number } {
+  const global = isGlobal(g);
+  const lonSpan = view.east - view.west;
+  const latSpan = view.north - view.south;
+  const mLon = lonSpan * 0.6;
+  const mLat = latSpan * 0.6;
+  const south = view.south - mLat;
+  const north = view.north + mLat;
   let x0 = 0;
   let x1 = g.nx;
-  let y0 = 0;
-  let y1 = g.ny;
-  const global = isGlobal(g);
+  let y0 = Math.max(0, Math.floor((south - g.latMin) / g.dy / span) * span);
+  let y1 = Math.min(g.ny, Math.ceil((north - g.latMin) / g.dy / span) * span);
+  const west = view.west - mLon;
+  const east = view.east + mLon;
+  const gridEast = g.lonMin + g.nx * g.dx;
+  // Vue qui franchit l'antiméridien ou très large : on garde toute la largeur.
+  const crosses = global && (west < g.lonMin || east > gridEast || east - west > 300);
+  if (!crosses) {
+    x0 = Math.max(0, Math.floor((west - g.lonMin) / g.dx / span) * span);
+    x1 = Math.min(g.nx, Math.ceil((east - g.lonMin) / g.dx / span) * span);
+  }
+  if (x1 <= x0 || y1 <= y0) {
+    // Vue hors de la grille : fenêtre minimale (un bloc), le rendu n'affichera rien.
+    x0 = 0;
+    x1 = Math.min(g.nx, span);
+    y0 = 0;
+    y1 = Math.min(g.ny, span);
+  }
+  return { x0, x1, y0, y1 };
+}
 
-  if (g.nx * g.ny > MAX_CELLS) {
-    const lonSpan = view.east - view.west;
-    const latSpan = view.north - view.south;
-    const mLon = lonSpan * 0.6;
-    const mLat = latSpan * 0.6;
-    const south = view.south - mLat;
-    const north = view.north + mLat;
-    y0 = Math.max(0, Math.floor((south - g.latMin) / g.dy / ALIGN) * ALIGN);
-    y1 = Math.min(g.ny, Math.ceil((north - g.latMin) / g.dy / ALIGN) * ALIGN + 1);
-    const west = view.west - mLon;
-    const east = view.east + mLon;
-    const gridEast = g.lonMin + g.nx * g.dx;
-    // Vue qui franchit l'antiméridien ou très large : on garde toute la largeur.
-    const crosses = global && (west < g.lonMin || east > gridEast || east - west > 300);
-    if (!crosses) {
-      x0 = Math.max(0, Math.floor((west - g.lonMin) / g.dx / ALIGN) * ALIGN);
-      x1 = Math.min(g.nx, Math.ceil((east - g.lonMin) / g.dx / ALIGN) * ALIGN + 1);
-    }
-    if (x1 <= x0 || y1 <= y0) {
-      // Vue hors de la grille : fenêtre minimale, le rendu n'affichera rien.
-      x0 = 0;
-      x1 = Math.min(g.nx, ALIGN);
-      y0 = 0;
-      y1 = Math.min(g.ny, ALIGN);
+/**
+ * Fenêtre de lecture pour une vue donnée, et son niveau de réduction : le plus petit niveau L dont la
+ * fenêtre tient dans `MAX_CELLS` et `MAX_DIM`. Les petites grilles sont lues en entier ; les grandes
+ * sont réduites à la vue (avec marge), alignée sur les blocs du niveau : ses bornes sont des multiples
+ * de 256 · 2^L, coupées au bord de la grille. Le pas rendu (`stride`) vaut 2^L.
+ */
+export function chooseWindow(g: GridSpec, view: ViewBounds): ReadWindow {
+  const global = isGlobal(g);
+  const whole = g.nx * g.ny <= MAX_CELLS;
+  for (let level = 0; ; level++) {
+    const stride = 2 ** level;
+    const { x0, x1, y0, y1 } = whole ? { x0: 0, x1: g.nx, y0: 0, y1: g.ny } : viewWindow(g, view, BLOCK * stride);
+    const w = Math.ceil((x1 - x0) / stride);
+    const h = Math.ceil((y1 - y0) / stride);
+    if (level === MAX_LEVEL || (w * h <= MAX_CELLS && w <= MAX_DIM && h <= MAX_DIM)) {
+      return { x0, x1, y0, y1, stride, wrap: global && x0 === 0 && x1 === g.nx };
     }
   }
-
-  const w = x1 - x0;
-  const h = y1 - y0;
-  let stride = Math.max(1, Math.ceil(Math.sqrt((w * h) / MAX_CELLS)));
-  stride = Math.max(stride, Math.ceil(w / MAX_DIM), Math.ceil(h / MAX_DIM));
-  return { x0, x1, y0, y1, stride, wrap: global && x0 === 0 && x1 === g.nx };
 }
 
 /** La fenêtre courante suffit-elle encore pour cette vue ? */
@@ -213,8 +228,8 @@ async function readSpec(
   stepHours: number,
   signal?: AbortSignal,
 ) {
-  const url = omFileUrl(spec.domain, meta.referenceTime, time);
-  const base = { url, win, dilate };
+  const field = fieldUrl(spec.domain, meta.referenceTime, time);
+  const base = { field, win, dilate };
   if (spec.op === 'scalar') {
     return pool.run({ ...base, op: 'scalar', variable: spec.variable, scale: spec.perHour ? 1 / stepHours : 1 }, signal);
   }

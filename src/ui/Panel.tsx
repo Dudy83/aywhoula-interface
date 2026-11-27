@@ -2,7 +2,7 @@
  * Ce qui s'ouvre à droite (ordinateur) ou en feuille (téléphone) : le profil, « Mes alertes », le formulaire
  * d'une alerte, sinon le lieu ouvert. Sur ordinateur, un point de la carte n'a qu'une petite carte (sa rose
  * dit déjà la houle, les vagues et le vent), comme un dialog réduit ; les autres lieux ont leur dialog sur
- * toute la hauteur. Sur téléphone, le dialog réduit se pose au-dessus de la légende (`Dock`).
+ * toute la hauteur. Sur téléphone, le dialog réduit est la ligne du lieu en tête de la barre du bas (`Dock`).
  */
 import { useEffect } from 'react';
 import { closeSide, useAccount } from '../state/account';
@@ -40,6 +40,6 @@ export function Panel() {
   if (side?.kind === 'alert') return <AlertFormPanel key={side.alert?.id ?? 'nouvelle'} side={side} />;
   if (!selection) return null;
   if (wide && selection.kind === 'point') return <PointCard key={selection.id} selection={selection} />;
-  if (reduced) return wide ? <ReducedCard key={selection.id} selection={selection} wide /> : null;
+  if (reduced) return wide ? <ReducedCard key={selection.id} selection={selection} /> : null;
   return <PlaceDialog key={selection.id} selection={selection} wide={wide} />;
 }

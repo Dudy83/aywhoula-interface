@@ -265,6 +265,34 @@ function selectionFromFeature(f: MapGeoJSONFeature): Selection {
   return { kind: p.kind as PlaceKind, id: p.id, name: p.name, lon, lat, detail: p.detail || undefined };
 }
 
+/** Ce que les lieux et les bouées attendent au plus, une fois le fond de carte dessiné, si le champ tarde. */
+const PLACES_WAIT_MS = 3000;
+
+/**
+ * Lance `start` quand la première carte est là (l'état du champ passe à « prêt »), ou après `PLACES_WAIT_MS`
+ * au plus : ce qui se charge là ne dispute plus le réseau aux grilles de l'ouverture, sans jamais en être
+ * privé si le champ tarde ou échoue. Renvoie de quoi annuler l'attente.
+ */
+function afterFirstField(start: () => void): () => void {
+  if (useStore.getState().status === 'ready') {
+    start();
+    return () => undefined;
+  }
+  const cancel = () => {
+    unsubscribe();
+    window.clearTimeout(timer);
+  };
+  const go = () => {
+    cancel();
+    start();
+  };
+  const unsubscribe = useStore.subscribe((s) => {
+    if (s.status === 'ready') go();
+  });
+  const timer = window.setTimeout(go, PLACES_WAIT_MS);
+  return cancel;
+}
+
 const accentColor = () => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#5fe3c0';
 
 /** Convertit une couleur CSS quelconque en couleur que le canevas sait peindre. */
@@ -282,6 +310,8 @@ export function MapView() {
   /** Le premier chargement du style est terminé : les couches de l'app existent. */
   const readyRef = useRef(false);
   const theme = useResolvedTheme();
+  // L'état du champ affiché, recopié sur la carte : le banc de mesure (scripts/bench-carte.mjs) le lit.
+  const status = useStore((st) => st.status);
   const themeRef = useRef(theme);
   themeRef.current = theme;
   // Élément de l'épingle de sélection : MapLibre le place, React y rend la rose (SelectionRose).
@@ -320,6 +350,12 @@ export function MapView() {
     applyAnimate();
     reduced.addEventListener('change', applyAnimate);
 
+    // Le contrôleur part dès que la carte est montée, avec la vue de départ : il demande le run, puis les
+    // blocs de grille, pendant que le fond de carte se charge, au lieu d'attendre l'événement `load`. Il ne
+    // touche pas à WebGL, et ne remet ses échéances à la couche qu'une fois le fond dessiné (`markShown`).
+    const controller = new FieldController(map, field, themeRef.current === 'dark');
+    controllerRef.current = controller;
+
     // Épingle de la sélection : MapLibre la place sur le point, son contenu est rendu par SelectionRose.
     const pin = new Marker({ element: pinEl, anchor: 'center' });
 
@@ -353,8 +389,8 @@ export function MapView() {
       set('webcams', show.webcams);
     };
 
-    let controller: FieldController | null = null;
     let disposed = false;
+    let cancelPlaces: () => void = () => undefined;
 
     const fillPlaces = () => {
       const fill = (id: string) => (list: Place[]) => {
@@ -365,36 +401,49 @@ export function MapView() {
       void loadWebcams().then(fill('webcams')).catch(() => undefined);
     };
 
+    /** Pose la couche du champ juste au-dessus de l'océan, si elle n'y est pas déjà. */
+    const addField = () => {
+      if (!map.getLayer(field.id)) map.addLayer(field, map.getLayer(FIELD_BEFORE) ? FIELD_BEFORE : undefined);
+    };
+
     map.on('load', () => {
       if (disposed) return;
       addIcons(map, canvasColor(accentColor()));
-      map.addLayer(field, FIELD_BEFORE);
+      addField();
       addMarkerLayers(map, themeRef.current);
       renderFavorites();
       renderVisibility();
-      controller = new FieldController(map, field, themeRef.current === 'dark');
-      controllerRef.current = controller;
       readyRef.current = true;
-
-      fillPlaces();
       // Les bouées connues d'avance sont placées tout de suite, évidées ; leur mesure suit.
       renderBuoys();
-      // Chaque réseau de bouées s'affiche dès qu'il répond ; les noms du NDBC suivent.
-      void loadBuoys((list) => {
-        buoys = list;
-        if (!disposed) renderBuoys();
-      });
-      void loadBuoyNames().then((n) => {
-        buoyNames = n;
-        if (!disposed) renderBuoys();
+      // Le fond de carte est dessiné : le champ déjà lu s'affiche, et l'écran de démarrage peut s'effacer.
+      controller.markShown();
+
+      // Plages, spots, webcams et bouées partent après la première carte : leurs fichiers ne disputent
+      // plus le réseau aux grilles de l'ouverture.
+      cancelPlaces = afterFirstField(() => {
+        if (disposed) return;
+        fillPlaces();
+        // Chaque réseau de bouées s'affiche dès qu'il répond ; les noms du NDBC suivent.
+        void loadBuoys((list) => {
+          buoys = list;
+          if (!disposed) renderBuoys();
+        });
+        void loadBuoyNames().then((n) => {
+          buoyNames = n;
+          if (!disposed) renderBuoys();
+        });
       });
     });
 
-    // Après une perte du contexte WebGL (onglet resté en arrière-plan sur mobile),
-    // MapLibre reconstruit le style sans les couches personnalisées : on remet le champ.
+    // La couche du champ se pose dès que le style est lu, sans attendre que le fond soit dessiné (`load`) :
+    // ses programmes sont prêts quand le champ arrive. Après une perte du contexte WebGL (onglet resté en
+    // arrière-plan sur mobile), MapLibre reconstruit le style sans les couches personnalisées : on remet
+    // le champ, et ce que montrent les marqueurs.
     map.on('style.load', () => {
-      if (disposed || !readyRef.current || map.getLayer(field.id)) return;
-      map.addLayer(field, map.getLayer(FIELD_BEFORE) ? FIELD_BEFORE : undefined);
+      if (disposed || map.getLayer(field.id)) return;
+      addField();
+      if (!readyRef.current) return;
       fillPlaces();
       renderBuoys();
       renderFavorites();
@@ -464,7 +513,8 @@ export function MapView() {
       reduced.removeEventListener('change', applyAnimate);
       clearTimeout(viewTimer);
       cancelAnimationFrame(hoverFrame);
-      controller?.destroy();
+      cancelPlaces();
+      controller.destroy();
       controllerRef.current = null;
       readyRef.current = false;
       mapApi.detach(map);
@@ -491,7 +541,7 @@ export function MapView() {
   // MapLibre impose sa propre position au conteneur : l'hôte porte la mise en page.
   return (
     <div className="map-host">
-      <div ref={container} className="map" role="application" aria-label="Carte des prévisions" />
+      <div ref={container} className="map" role="application" aria-label="Carte des prévisions" data-field-status={status} />
       {createPortal(<SelectionRose />, pinEl)}
     </div>
   );

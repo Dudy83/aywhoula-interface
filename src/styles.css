@@ -609,58 +609,174 @@ ul {
   color: var(--ink-2);
 }
 
-/* Couches : ruban défilant sur mobile, colonne sur grand écran. */
+/* Couches : sur téléphone, un bouton sous la recherche et sa feuille ; sur grand écran, une colonne
+   (`.layers`, plus bas). */
 
-.layers {
+/* Le bouton : à gauche sous la recherche, à la hauteur de l'ancien ruban ; la carte reste visible à sa droite. */
+.layer-button {
   position: absolute;
   top: calc(64px + var(--safe-top));
-  left: var(--safe-left);
-  right: var(--safe-right);
+  left: calc(10px + var(--safe-left));
   display: flex;
-  gap: 6px;
-  padding: 0 10px 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.layers::-webkit-scrollbar {
-  display: none;
-}
-
-.layers-group {
-  display: flex;
-  flex: none;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 10px 0 5px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
-}
-
-.layers-label {
-  display: none;
-}
-
-.layer {
-  flex: none;
-  height: 32px;
-  padding: 0 11px;
-  border-radius: var(--radius-sm);
-  color: var(--ink-2);
-  font-size: 0.8125rem;
-  font-weight: 550;
+  font-size: 0.9375rem;
+  font-weight: 700;
   white-space: nowrap;
+}
+
+/* L'icône de la couche dans un carré de voile d'accent : c'est la couche choisie. */
+.layer-button-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.layer-button > svg {
+  color: var(--ink-2);
+}
+
+/* La feuille « Couche de la carte » : elle monte du bas sur le voile des fenêtres du compte (`.overlay`). */
+.layer-sheet {
+  position: relative;
+  width: 100%;
+  max-height: calc(100dvh - 24px - var(--safe-top));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 calc(16px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  /* Elle se glisse vers le bas sous le doigt ; quand son contenu défile (écran bas), par sa poignée seulement. */
+  touch-action: none;
+  transition:
+    transform 240ms var(--ease),
+    opacity 240ms var(--ease);
+}
+
+.layer-sheet[data-scrolls] {
+  touch-action: pan-y;
+}
+
+.layer-sheet[data-scrolls] .layer-sheet-head {
+  touch-action: none;
+}
+
+@starting-style {
+  .layer-sheet {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+.layer-overlay[data-closing] .layer-sheet {
+  transform: translateY(24px);
+  opacity: 0;
+}
+
+.layer-overlay[data-closing] .overlay-dim {
+  opacity: 0;
+}
+
+.layer-sheet-grip {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  margin-bottom: 6px;
+}
+
+.layer-sheet-grip::before {
+  content: '';
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.layer-sheet-title {
+  font-size: 1.125rem;
+  font-weight: 750;
+  font-stretch: 104%;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+/* L'intitulé d'un groupe, en petites capitales : la seule exception à la règle sans capitales (DESIGN.md). */
+.layer-sheet-label {
+  margin: 14px 0 8px;
+  color: var(--ink-3);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.layer-sheet-group + .layer-sheet-group .layer-sheet-label {
+  margin-top: 16px;
+}
+
+.layer-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Une tuile : l'icône au-dessus du nom. La couche affichée prend les jetons de la couche choisie, et un bord d'accent. */
+.layer-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: left;
+  hyphens: auto;
+  overflow-wrap: break-word;
   transition:
     background-color 160ms var(--ease),
+    border-color 160ms var(--ease),
     color 160ms var(--ease);
 }
 
-.layer:hover {
-  background: var(--surface-2);
-  color: var(--ink);
+.layer-tile > span {
+  max-width: 100%;
 }
 
-.layer[aria-checked='true'] {
+/* Sous 384 px, « Température » en gras ne tient plus dans sa tuile : un peu moins de marge, un peu plus petit. */
+@media (max-width: 383.98px) {
+  .layer-tile {
+    padding: 10px;
+    font-size: 0.8125rem;
+  }
+}
+
+/* Le survol, seulement avec une souris : au doigt, il resterait sur la tuile sous le dernier toucher. */
+@media (hover: hover) {
+  .layer-tile:hover {
+    background: var(--surface-2);
+  }
+}
+
+.layer-tile[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 700;
@@ -934,19 +1050,150 @@ ul {
   pointer-events: auto;
 }
 
+/* La barre du bas de l'ordinateur : sa grille est posée avec la bascule grand écran. */
 .dock {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas:
-    'play clock view model'
-    'time time time time';
   align-items: center;
-  gap: 8px 10px;
   width: 100%;
-  padding: 8px;
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+/* Téléphone : la barre du bas, une seule surface. La lecture, l'heure et le modèle, puis la frise des jours ;
+   la feuille d'un lieu réduite y ajoute en tête la ligne du lieu, sous sa poignée, au-dessus d'un filet. */
+.dock-bar {
+  width: 100%;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.dock-bar > .sheet-bar-row {
+  margin: 0;
+  padding-top: 12px;
+}
+
+/* La ligne du lieu réduit se replie quand il est fermé (ou rouvert) : la surface change de hauteur. */
+.dock-place {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 240ms var(--ease),
+    opacity 240ms var(--ease);
+}
+
+.dock-place[data-leaving] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.dock-place-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* La poignée et la ligne : un glissé vers le haut rouvre la feuille. */
+.dock-place-handle {
+  touch-action: none;
+}
+
+.dock-place-grip {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  cursor: pointer;
+}
+
+.dock-place-grip::before {
+  content: '';
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.dock-place-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* La croix au même retrait du bord que celle de la feuille ouverte. */
+.dock-place-row .place-card-actions {
+  margin-right: -8px;
+}
+
+/*
+ * La frise des jours : une étiquette par jour séparée par un filet, la piste dessous, sa partie passée en
+ * accent et le curseur rond à l'heure de la carte. 44 px de haut : toute la frise répond au doigt.
+ */
+.day-strip {
+  position: relative;
+  height: 44px;
+  margin-top: 6px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.day-strip:focus-visible {
+  outline-offset: 0;
+  border-radius: var(--radius-sm);
+}
+
+.day-strip-day {
+  position: absolute;
+  top: 0;
+  height: 24px;
+  padding-left: 7px;
+  border-left: 1px solid var(--line);
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.day-strip-day::first-letter {
+  text-transform: uppercase;
+}
+
+.day-strip-day[data-today] {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.day-strip-track {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.day-strip-past {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.day-strip-thumb {
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface);
+  transform: translate(-50%, -50%);
 }
 
 .play {
@@ -1433,10 +1680,9 @@ ul {
   justify-self: end;
 }
 
-/* Le pas, partagé avec le détail du jour : dans la barre sur grand écran ; sur téléphone, dans le panneau. */
+/* Le pas et le type d'affichage, dans la barre du bas de l'ordinateur ; sur téléphone, dans la feuille d'un lieu. */
 .tl-step {
   grid-area: step;
-  display: none;
 }
 
 .model {
@@ -2832,6 +3078,20 @@ button.live-tile:hover {
     display: none;
   }
 
+  /* La barre revient quand la feuille d'un lieu se réduit ou se ferme : un fondu avec un léger glissement. */
+  .dock-area {
+    transition:
+      opacity 240ms var(--ease),
+      transform 240ms var(--ease);
+  }
+
+  @starting-style {
+    .dock-area {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
   /* Cible assez grande pour le doigt : 32 px visibles, 44 px au toucher. */
   .sheet-bar .segment {
     position: relative;
@@ -2879,33 +3139,32 @@ button.live-tile:hover {
     display: grid;
   }
 
+  /* La colonne des couches, à gauche sous la recherche. */
   .layers {
+    position: absolute;
     top: calc(var(--gap) + 56px + var(--safe-top));
     left: calc(var(--gap) + var(--safe-left));
-    right: auto;
+    display: flex;
     flex-direction: column;
     gap: 0;
     width: 156px;
     padding: 6px;
-    overflow: visible;
     border-radius: var(--radius);
     background: var(--surface);
     box-shadow: var(--shadow);
   }
 
   .layers-group {
+    display: flex;
+    flex: none;
     flex-direction: column;
     gap: 1px;
-    padding: 0;
-    background: none;
-    box-shadow: none;
   }
 
   .layers-group + .layers-group {
     margin-top: 6px;
     padding-top: 6px;
     border-top: 1px solid var(--line);
-    border-radius: 0;
   }
 
   .layers-label {
@@ -2916,9 +3175,29 @@ button.live-tile:hover {
   }
 
   .layer {
+    flex: none;
     height: 30px;
     padding: 0 10px;
+    border-radius: var(--radius-sm);
+    color: var(--ink-2);
+    font-size: 0.8125rem;
+    font-weight: 550;
     text-align: left;
+    white-space: nowrap;
+    transition:
+      background-color 160ms var(--ease),
+      color 160ms var(--ease);
+  }
+
+  .layer:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+
+  .layer[aria-checked='true'] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
   }
 
   .controls {
@@ -4396,5 +4675,25 @@ button.live-tile:hover {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+
+  /* La barre du bas du téléphone, la ligne d'un lieu réduit et la feuille des couches : un simple fondu, sans
+     glissement ni changement de hauteur animé. La ligne qui part s'efface d'abord, la barre se resserre ensuite. */
+  .dock-place,
+  .layer-sheet,
+  .layer-overlay .overlay-dim {
+    transition-property: opacity !important;
+    transition-duration: 240ms !important;
+  }
+
+  .dock-place[data-leaving] {
+    grid-template-rows: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (max-width: 899.98px) {
+  .dock-area {
+    transition-property: opacity !important;
+    transition-duration: 240ms !important;
   }
 }

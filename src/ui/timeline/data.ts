@@ -8,6 +8,7 @@ import { useAsync, useForecastPoint } from '../../data/nearby';
 import { pickSeries, seaOf, totalOf } from '../../data/sea-state';
 import { useAccount } from '../../state/account';
 import { useStore } from '../../state/store';
+import { useWide } from '../common';
 import { useForecast } from '../useForecast';
 
 /** Les séries d'un type sur les heures de la prévision du point : une colonne du tableau, un point des courbes. */
@@ -25,8 +26,10 @@ function onTimes(times: number[], detail: DetailSeries): Record<string, Series> 
 
 /**
  * Le lieu de la ligne de temps et ses séries, avec le modèle de la carte pour chaque famille : le lieu ouvert,
- * sinon le dernier ouvert ; la prévision d'une webcam est celle du lieu qu'elle filme. `d` : les séries du
- * type choisi, par nom de variable, `null` pour « Vagues et vent » ou tant qu'elles ne sont pas là.
+ * sinon, sur ordinateur, le dernier ouvert ; la prévision d'une webcam est celle du lieu qu'elle filme. Sur
+ * téléphone, la ligne de temps ne vit que dans la feuille d'un lieu ouvert : jamais la prévision d'un lieu
+ * fermé. `d` : les séries du type choisi, par nom de variable, `null` pour « Vagues et vent » ou tant qu'elles
+ * ne sont pas là.
  */
 export function useTimelineData() {
   const selection = useStore((s) => s.selection);
@@ -36,7 +39,8 @@ export function useTimelineData() {
   const profile = useStore((s) => s.timelineProfile);
   const premium = useAccount((s) => s.me?.premium ?? false);
   const known = useAccount((s) => s.status !== 'loading');
-  const place = selection ?? last;
+  const wide = useWide();
+  const place = selection ?? (wide ? last : null);
   const point = useForecastPoint(place);
   const { data: fc } = useForecast(point);
   // Sans heure à couvrir, pas de relais : le modèle de la carte, jusqu'où il va.

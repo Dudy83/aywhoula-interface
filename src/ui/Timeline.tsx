@@ -7,8 +7,8 @@
  * en abscisse ; sept jours à l'écran sur ordinateur, deux et un bout du troisième dans le dialog du
  * téléphone, les suivants en faisant défiler. En tableau : deux groupes de lignes séparés par un filet,
  * qui défile de côté. Le pas (1, 3, 5 ou 12 h) est le même pour les deux vues : une colonne du tableau, un
- * point des courbes. Les valeurs sont celles du modèle de la carte, pour le lieu ouvert, sinon le dernier
- * ouvert (une bouée : à la bouée ; une webcam : au lieu qu'elle filme, sinon à la caméra).
+ * point des courbes. Les valeurs sont celles du modèle de la carte, pour le lieu ouvert, sinon (sur ordinateur)
+ * le dernier ouvert (une bouée : à la bouée ; une webcam : au lieu qu'elle filme, sinon à la caméra).
  * Version gratuite : les jours de Premium (du sixième au seizième) gardent l'échelle et le pas des jours
  * ouverts, désactivés (couloirs hachurés, cases vides), sous l'étiquette « +11 jours » ; toucher la zone ouvre
  * l'offre.

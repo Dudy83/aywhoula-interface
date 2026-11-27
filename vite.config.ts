@@ -12,6 +12,11 @@ const proxy = {
   '/api': {
     target: 'http://localhost:8787',
   },
+  // Les grilles de la carte, préparées par le processus `grids` du serveur :
+  // `npm --prefix server run dev:grids`.
+  '/grilles': {
+    target: 'http://localhost:8789',
+  },
   '/proxy/ndbc': {
     target: 'https://www.ndbc.noaa.gov',
     changeOrigin: true,
@@ -60,11 +65,11 @@ const pwa = VitePWA({
   includeManifestIcons: false,
   workbox: {
     // La coque : page, scripts (dont le worker de MapLibre en .mjs), styles,
-    // décodeur des grilles, polices, icônes. Le plugin y ajoute lui-même
-    // manifest.webmanifest : le lister ici le mettrait deux fois.
-    globPatterns: ['**/*.{html,js,mjs,css,wasm,woff2,svg,png}'],
-    // Le décodeur des grilles (.wasm, 2,1 Mo) dépasse la limite par défaut de
-    // 2 Mio : il serait écarté sans bruit et l'app ne démarrerait pas hors ligne.
+    // polices, icônes. Le plugin y ajoute lui-même manifest.webmanifest : le
+    // lister ici le mettrait deux fois.
+    globPatterns: ['**/*.{html,js,mjs,css,woff2,svg,png}'],
+    // Le script de l'appli (1,6 Mo) approche la limite par défaut de 2 Mio : au-delà,
+    // il serait écarté sans bruit et l'app ne démarrerait pas hors ligne.
     maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
     // Une nouvelle version prend la main dès son installation, sans attendre la
     // fermeture de toutes les fenêtres de l'app. Une page restée ouverte garde son
@@ -75,12 +80,13 @@ const pwa = VitePWA({
     // Réception des notifications d'alerte : public/push-sw.js, chargé par le service worker généré.
     importScripts: ['push-sw.js'],
     navigateFallback: '/index.html',
-    // Les relais des bouées et l'API ne sont pas des pages de l'app : le retour de Google
+    // Les relais des bouées, l'API et les grilles ne sont pas des pages de l'app : le retour de Google
     // (/api/auth/callback/google) et le lien de pause d'une alerte doivent arriver au serveur.
-    navigateFallbackDenylist: [/^\/proxy\//, /^\/api\//],
+    navigateFallbackDenylist: [/^\/proxy\//, /^\/api\//, /^\/grilles\//],
     // Une seule route : les fichiers de spots, plages et webcams. Ne jamais en
-    // ajouter pour les grilles .om (requêtes partielles), les relais /proxy/…,
-    // les API de prévision ou les bouées : ce sont des données en direct.
+    // ajouter pour les grilles (/grilles/… : le cache HTTP du navigateur garde déjà
+    // leurs blocs, qui ne changent jamais), les relais /proxy/…, les API de
+    // prévision ou les bouées : ce sont des données en direct.
     runtimeCaching: [
       {
         urlPattern: ({ sameOrigin, url }) => sameOrigin && /^\/data\/[^/]+\.json$/.test(url.pathname),

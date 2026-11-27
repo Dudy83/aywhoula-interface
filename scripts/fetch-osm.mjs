@@ -4,11 +4,15 @@
 // commerces (écoles, boutiques, loueurs, campings), sont retirés. Les nouveaux noms qui
 // ressemblent à un commerce sont affichés, sans être retirés, pour compléter cette liste.
 // Usage : npm run data:spots
+// Le masque terre/mer se lit dans le service des grilles de l'appli : le processus local par défaut
+// (`npm --prefix server run dev:grids`), ou l'appli en ligne avec GRIDS_URL=<son adresse>.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const ENDPOINT = 'https://postpass.geofabrik.de/api/interpreter';
+/** Où se lisent les grilles (`/grilles/…`), sans barre finale. */
+const GRIDS_URL = (process.env.GRIDS_URL ?? 'http://localhost:8789').replace(/\/+$/, '');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(HERE, '..', 'public', 'data');
 const EXCLUDED_FILE = path.join(HERE, 'spots-exclus.json');
@@ -181,38 +185,82 @@ async function fetchBeaches(nearSea, spots) {
 /**
  * Masque terre/mer tiré du modèle de vagues MFWAM (grille 1/12°) : une cellule
  * est « en mer » si le modèle y donne une hauteur de vagues.
+ *
+ * Il se lit dans les blocs que prépare le service des grilles de l'appli (`/grilles/…`,
+ * voir `server/src/grids/`), au niveau 0 : la grille native. Dans un bloc, le code 65535
+ * veut dire « pas de donnée ».
  */
 async function loadSeaMask() {
-  const { OmHttpBackend, OmDataType, LruBlockCache } = await import('@openmeteo/file-reader');
-  const base = 'https://openmeteo.s3.amazonaws.com/data_spatial/meteofrance_wave';
-  const meta = await (await fetch(`${base}/latest.json`)).json();
+  // La grille de `meteofrance_wave` (`DOMAINS` de src/data/catalog.ts) et le côté d'un bloc.
+  const nx = 4320;
+  const ny = 2041;
+  const lonMin = -180 + 1 / 24;
+  const latMin = -80 + 1 / 24;
+  const BLOCK = 256;
+  const base = `${GRIDS_URL}/grilles/meteofrance_wave`;
+
+  let meta;
+  try {
+    const res = await fetch(`${base}/latest.json`, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`réponse ${res.status}`);
+    meta = await res.json();
+  } catch (err) {
+    throw new Error(
+      `Le service des grilles ne répond pas à ${GRIDS_URL} (${err.message}). Lancer « npm --prefix server run dev:grids », ou donner l'adresse de l'appli en ligne : GRIDS_URL=https://…`,
+    );
+  }
   const p = (n) => String(n).padStart(2, '0');
   const ref = new Date(meta.reference_time);
   const valid = new Date(meta.valid_times[0].replace(/Z$/, ':00Z'));
   const run = `${ref.getUTCFullYear()}/${p(ref.getUTCMonth() + 1)}/${p(ref.getUTCDate())}/${p(ref.getUTCHours())}${p(ref.getUTCMinutes())}Z`;
   const file = `${valid.getUTCFullYear()}-${p(valid.getUTCMonth() + 1)}-${p(valid.getUTCDate())}T${p(valid.getUTCHours())}${p(valid.getUTCMinutes())}`;
-  const backend = new OmHttpBackend({ url: `${base}/${run}/${file}.om`, eTagValidation: false });
-  return backend.withReader(new LruBlockCache(64 * 1024, 256), async (reader) => {
-    const v = await reader.getChildByName('wave_height');
-    const [ny, nx] = v.getDimensions();
-    const data = await v.read({ type: OmDataType.FloatArray, ranges: [{ start: 0, end: ny }, { start: 0, end: nx }] });
-    const lonMin = -180 + 1 / 24;
-    const latMin = -80 + 1 / 24;
-    /** Vrai si une cellule de mer se trouve à ±1 cellule (≈ 10 km) du point. */
-    return (lon, lat) => {
-      const cx = Math.round((lon - lonMin) * 12);
-      const cy = Math.round((lat - latMin) * 12);
-      for (let dy = -1; dy <= 1; dy++) {
-        const y = cy + dy;
-        if (y < 0 || y >= ny) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          const x = (((cx + dx) % nx) + nx) % nx;
-          if (!Number.isNaN(data[y * nx + x])) return true;
+
+  /** 1 là où le modèle donne une hauteur de vagues. */
+  const sea = new Uint8Array(nx * ny);
+  const blocks = [];
+  for (let by = 0; by * BLOCK < ny; by++) for (let bx = 0; bx * BLOCK < nx; bx++) blocks.push({ by, bx });
+  let next = 0;
+  const worker = async () => {
+    while (next < blocks.length) {
+      const { by, bx } = blocks[next++];
+      // Le serveur prépare un bloc du niveau 0 à sa première demande : la première fois, c'est plus long.
+      const res = await fetch(`${base}/${run}/${file}/wave_height/0/${by}-${bx}.bin`, { signal: AbortSignal.timeout(180_000) });
+      if (!res.ok) throw new Error(`Bloc ${by}-${bx} du masque terre/mer indisponible (${res.status})`);
+      const view = new DataView(await res.arrayBuffer());
+      const w = Math.min(BLOCK, nx - bx * BLOCK);
+      const h = Math.min(BLOCK, ny - by * BLOCK);
+      // « AWG1 », la largeur et la hauteur, puis w × h codes de 16 bits, chaque ligne en différences.
+      if (view.byteLength !== 16 + w * h * 2 || view.getUint32(0) !== 0x41574731 || view.getUint16(4, true) !== w || view.getUint16(6, true) !== h) {
+        throw new Error(`Bloc ${by}-${bx} du masque terre/mer illisible`);
+      }
+      let at = 16;
+      for (let r = 0; r < h; r++) {
+        let code = 0;
+        const row = (by * BLOCK + r) * nx + bx * BLOCK;
+        for (let c = 0; c < w; c++) {
+          code = (code + view.getUint16(at, true)) & 0xffff;
+          at += 2;
+          if (code !== 65535) sea[row + c] = 1;
         }
       }
-      return false;
-    };
-  });
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+
+  /** Vrai si une cellule de mer se trouve à ±1 cellule (≈ 10 km) du point. */
+  return (lon, lat) => {
+    const cx = Math.round((lon - lonMin) * 12);
+    const cy = Math.round((lat - latMin) * 12);
+    for (let dy = -1; dy <= 1; dy++) {
+      const y = cy + dy;
+      if (y < 0 || y >= ny) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = (((cx + dx) % nx) + nx) % nx;
+        if (sea[y * nx + x] === 1) return true;
+      }
+    }
+    return false;
+  };
 }
 
 /** Une adresse qui s'ouvre dans le navigateur, en http: ou https:, rien d'autre (ni javascript:, ni data:). */
